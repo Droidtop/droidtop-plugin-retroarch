@@ -110,25 +110,13 @@ class RetroArchPlugin : DroidtopPlugin {
     }
 
     /**
-     * droidtop's own PluginContext.launchApp() has no way to attach
-     * extras (DESIGN.md 2) -- this repo's own commit adding
-     * launchAppWithExtras(packageName, extras, action) is prepared
-     * against droidtop's plugin-host (see this repo's README) but not
-     * merged at the time this file was written, so it cannot be called
-     * directly without breaking THIS repo's own CI, which always
-     * compiles against droidtop's real, current :plugin-host. Reflection
-     * lets this plugin start using the richer call the moment droidtop
-     * actually ships it, with no plugin rebuild required, while still
-     * degrading cleanly (a bare launchApp(), extras dropped) on any
-     * droidtop build that doesn't have it yet.
+     * DESIGN.md 2: droidtop's plugin-host now ships
+     * PluginContext.launchAppWithExtras (merged into Droidtop/droidtop
+     * main 2026-09-27, commit 87fccc4c), so RetroArch's own ROM/LIBRETRO/
+     * CONFIGFILE extras attach directly -- no more reflection bridge.
      */
-    private fun launchWithExtras(pkg: String, extras: Map<String, String>): Boolean {
-        if (extras.isEmpty()) return context.launchApp(pkg)
-        return runCatching {
-            val method = context.javaClass.getMethod("launchAppWithExtras", String::class.java, Map::class.java, String::class.java)
-            method.invoke(context, pkg, extras, null) as Boolean
-        }.getOrElse { context.launchApp(pkg) }
-    }
+    private fun launchWithExtras(pkg: String, extras: Map<String, String>): Boolean =
+        if (extras.isEmpty()) context.launchApp(pkg) else context.launchAppWithExtras(pkg, extras)
 
     // ---------------------------------------------------------------
     // status_tile / settings_rows

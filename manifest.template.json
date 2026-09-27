@@ -1,0 +1,13 @@
+{
+  "id": "droidtop.retroarch",
+  "origin": "droidtop",
+  "label": "RetroArch manager",
+  "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and updates cheats in shared storage. See DESIGN.md for the source citations behind every claim this plugin makes.",
+  "version": "1.0.0",
+  "kind": "native_bundle",
+  "capabilities": ["app_status", "status_tile", "settings_rows"],
+  "contractVersion": 1,
+  "requestsRoot": true,
+  "abis": [],
+  "entryClass": "dev.droidtop.plugins.retroarch.RetroArchPlugin"
+}

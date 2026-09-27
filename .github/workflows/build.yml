@@ -73,10 +73,22 @@ jobs:
           "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}"
 
+      - name: Validate Gradle wrappers
+        # droidtop's own vendor/SDL2/android-project wrapper (SDL's sample
+        # Android project, not something this build even touches) is not
+        # on Gradle's list of release checksums; droidtop's own
+        # android-setup action allows exactly this one checksum for the
+        # same reason -- see its action.yml comment.
+        uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          min-wrapper-count: 1
+          allow-checksums: 2c23278a62dc9f96ab11bee897d9f53e6479d6419135e4560ce822a6431df5e5
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           cache-cleanup: on-success
+          validate-wrappers: false
 
       - name: Build droidtop's :plugin-host
         env:

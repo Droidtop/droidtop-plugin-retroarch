@@ -81,6 +81,8 @@ of the extras above can be attached through the existing API. Since
 plugin holding a Context of its own"), this needed a real, generic
 addition rather than a plugin-side workaround.
 
+Until that commit is merged into `Droidtop/droidtop`'s own `main` (this repo's CI always compiles against that real, current `:plugin-host`, so a hard dependency on an unmerged method would leave CI red), `RetroArchPlugin.launchWithExtras` reaches the new method by reflection (`PluginContext::class.java.getMethod("launchAppWithExtras", ...)`) and falls back to the existing bare `launchApp` when it is absent, so the plugin builds and runs today and starts attaching extras automatically the moment the API lands, with no plugin rebuild.
+
 ## 3. Where RetroArch's files actually live
 
 Both from `frontend/drivers/platform_unix.c`'s own default-path

@@ -6,6 +6,7 @@ import dev.droidtop.pluginhost.PluginCapability
 import dev.droidtop.pluginhost.PluginContext
 import dev.droidtop.pluginhost.PluginJobProgress
 import dev.droidtop.pluginhost.PluginResult
+import android.os.Build
 import java.io.File
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -41,7 +42,7 @@ class RetroArchPlugin : DroidtopPlugin {
         else -> PluginResult.failure("RetroArchPlugin does not implement ${capability.id}")
     }
 
-    override fun startJob(capability: PluginCapability, args: PluginArgs, progress: PluginJobProgress) {
+    override fun startJob(jobId: String, capability: PluginCapability, args: PluginArgs, progress: PluginJobProgress) {
         if (capability != PluginCapability.APP_STATUS || args.string("job") != JOB_DOWNLOAD_CORE) {
             throw UnsupportedOperationException("RetroArchPlugin only supports the '$JOB_DOWNLOAD_CORE' job under app_status")
         }
@@ -100,12 +101,33 @@ class RetroArchPlugin : DroidtopPlugin {
             args.string("core")?.let { put("LIBRETRO", it) }
             args.string("config")?.let { put("CONFIGFILE", it) }
         }
-        val launched = if (extras.isEmpty()) context.launchApp(pkg) else context.launchAppWithExtras(pkg, extras)
+        val launched = launchWithExtras(pkg, extras)
         return if (launched) {
             PluginResult.success(mapOf("launched" to "true", "package" to pkg))
         } else {
             PluginResult.failure("launchApp failed for $pkg")
         }
+    }
+
+    /**
+     * droidtop's own PluginContext.launchApp() has no way to attach
+     * extras (DESIGN.md 2) -- this repo's own commit adding
+     * launchAppWithExtras(packageName, extras, action) is prepared
+     * against droidtop's plugin-host (see this repo's README) but not
+     * merged at the time this file was written, so it cannot be called
+     * directly without breaking THIS repo's own CI, which always
+     * compiles against droidtop's real, current :plugin-host. Reflection
+     * lets this plugin start using the richer call the moment droidtop
+     * actually ships it, with no plugin rebuild required, while still
+     * degrading cleanly (a bare launchApp(), extras dropped) on any
+     * droidtop build that doesn't have it yet.
+     */
+    private fun launchWithExtras(pkg: String, extras: Map<String, String>): Boolean {
+        if (extras.isEmpty()) return context.launchApp(pkg)
+        return runCatching {
+            val method = context.javaClass.getMethod("launchAppWithExtras", String::class.java, Map::class.java, String::class.java)
+            method.invoke(context, pkg, extras, null) as Boolean
+        }.getOrElse { context.launchApp(pkg) }
     }
 
     // ---------------------------------------------------------------
@@ -213,7 +235,7 @@ class RetroArchPlugin : DroidtopPlugin {
      * device's own supported ABI list.
      */
     private fun preferredAbi(): String? {
-        val supported = android.os.Build.SUPPORTED_ABIS.toSet()
+        val supported = Build.SUPPORTED_ABIS.toSet()
         return listOf("arm64-v8a", "x86_64", "armeabi-v7a", "x86").firstOrNull { it in supported }
     }
 

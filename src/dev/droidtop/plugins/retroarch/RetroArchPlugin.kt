@@ -4,6 +4,7 @@ import dev.droidtop.pluginhost.DroidtopPlugin
 import dev.droidtop.pluginhost.PluginArgs
 import dev.droidtop.pluginhost.PluginCapability
 import dev.droidtop.pluginhost.PluginContext
+import dev.droidtop.pluginhost.PluginEvent
 import dev.droidtop.pluginhost.PluginJobProgress
 import dev.droidtop.pluginhost.PluginResult
 import android.os.Build
@@ -28,8 +29,22 @@ import java.util.zip.ZipInputStream
  * in DESIGN.md 7, and this class never throws just because
  * [PluginContext.hasRootApproval] is false.
  */
+/** Thrown from inside the download loop when DroidtopPlugin.cancelJob asked this job to stop -- caught in runDownloadCoreJob, same as any other download failure. */
+private class CancellationException(message: String) : Exception(message)
+
 class RetroArchPlugin : DroidtopPlugin {
     private lateinit var context: PluginContext
+
+    // Cancellation for the one job this plugin supports (docs/SPEC.md
+    // 12a "Jobs": DroidtopPlugin.cancelJob is best-effort by default --
+    // this plugin makes it a REAL best-effort by checking the flag
+    // inside its own download loop, since HttpURLConnection's stream
+    // read has no other cooperative cancellation point). One in-flight
+    // job at a time is the only case this plugin's own startJob ever
+    // creates (JOB_DOWNLOAD_CORE), so a single id/flag pair is enough --
+    // no need for a map keyed by jobId.
+    @Volatile private var activeDownloadJobId: String? = null
+    @Volatile private var cancelRequested: Boolean = false
 
     override fun onLoad(context: PluginContext) {
         this.context = context
@@ -46,7 +61,46 @@ class RetroArchPlugin : DroidtopPlugin {
         if (capability != PluginCapability.APP_STATUS || args.string("job") != JOB_DOWNLOAD_CORE) {
             throw UnsupportedOperationException("RetroArchPlugin only supports the '$JOB_DOWNLOAD_CORE' job under app_status")
         }
+        activeDownloadJobId = jobId
+        cancelRequested = false
         runDownloadCoreJob(args, progress)
+    }
+
+    override fun cancelJob(jobId: String) {
+        if (jobId == activeDownloadJobId) cancelRequested = true
+    }
+
+    // ---------------------------------------------------------------
+    // Event hooks (docs/SPEC.md 12a "Event hooks")
+    // ---------------------------------------------------------------
+
+    /**
+     * Reacts to [PluginEvent.DEFAULT_PLAYER_CHANGED] (this plugin's own
+     * subscription, manifest.template.json's `subscribedEvents`): when
+     * droidtop just made an installed RetroArch the default player for a
+     * system that names a core, and that core isn't downloaded yet, asks
+     * droidtop to start [JOB_DOWNLOAD_CORE] for it -- the real,
+     * cited reason this plugin needed the event mechanism built at all
+     * (droidtop docs/SPEC.md 12a). No-ops (plain success, no `startJob`)
+     * for every other case: RetroArch not installed, the event naming a
+     * different player's package, no core configured for that system, or
+     * the core already downloaded.
+     */
+    override fun onEvent(event: PluginEvent, args: PluginArgs): PluginResult {
+        if (event != PluginEvent.DEFAULT_PLAYER_CHANGED) return PluginResult.success()
+        val installed = detectInstalledPackage() ?: return PluginResult.success()
+        val playerPackage = args.string("playerPackage").orEmpty()
+        if (playerPackage != installed) return PluginResult.success()
+        val core = args.string("core").orEmpty()
+        if (core.isBlank()) return PluginResult.success()
+        if (core in listDownloadedCores()) return PluginResult.success(mapOf("note" to "core '$core' already downloaded"))
+        return PluginResult.success(
+            mapOf(
+                "startJob" to PluginCapability.APP_STATUS.id,
+                "job" to JOB_DOWNLOAD_CORE,
+                "core" to core,
+            ),
+        )
     }
 
     // ---------------------------------------------------------------
@@ -74,6 +128,13 @@ class RetroArchPlugin : DroidtopPlugin {
         val downloaded = listDownloadedCores()
         values["downloadedCoreCount"] = downloaded.size.toString()
         if (downloaded.isNotEmpty()) values["downloadedCores"] = downloaded.joinToString(",")
+        // Generic app_status job-offer convention (droidtop docs/SPEC.md
+        // 12a, PluginAppStatus's own doc comment): names JOB_DOWNLOAD_CORE
+        // as a one-text-field job droidtop's generic app_status screen
+        // can offer without droidtop knowing anything RetroArch-specific.
+        values["job"] = JOB_DOWNLOAD_CORE
+        values["jobArgKey"] = "core"
+        values["jobLabel"] = "Download a core by name (e.g. snes9x)"
         return PluginResult.success(values)
     }
 
@@ -247,6 +308,11 @@ class RetroArchPlugin : DroidtopPlugin {
                 val buffer = ByteArray(64 * 1024)
                 var lastReported = -1
                 while (true) {
+                    // Checked every chunk (up to 64 KiB read, never a
+                    // whole file's worth) so a cancel actually stops the
+                    // transfer promptly instead of only being honored
+                    // between whole downloads.
+                    if (cancelRequested) throw CancellationException("download cancelled")
                     val n = input.read(buffer)
                     if (n < 0) break
                     output.write(buffer, 0, n)

@@ -6,6 +6,7 @@
   "version": "1.0.0",
   "kind": "native_bundle",
   "capabilities": ["app_status", "status_tile", "settings_rows"],
+  "subscribedEvents": ["default_player_changed"],
   "contractVersion": 1,
   "requestsRoot": true,
   "abis": [],

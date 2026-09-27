@@ -15,6 +15,7 @@ import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.URL
 import java.util.zip.ZipInputStream
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Integrates an installed RetroArch into droidtop (docs/SPEC.md 12a).
@@ -33,18 +34,12 @@ import java.util.zip.ZipInputStream
 private class CancellationException(message: String) : Exception(message)
 
 class RetroArchPlugin : DroidtopPlugin {
+    // Cancellation keyed by jobId, not one flag -- concurrent download_core jobs really do happen.
+    // A shared flag would let cancelling one job silently cancel every other job in flight too;
+    // each jobId gets its own entry here, checked from inside that job's own download loop.
+    private val cancelledJobs = ConcurrentHashMap.newKeySet<String>()
     private lateinit var context: PluginContext
 
-    // Cancellation for the one job this plugin supports (docs/SPEC.md
-    // 12a "Jobs": DroidtopPlugin.cancelJob is best-effort by default --
-    // this plugin makes it a REAL best-effort by checking the flag
-    // inside its own download loop, since HttpURLConnection's stream
-    // read has no other cooperative cancellation point). One in-flight
-    // job at a time is the only case this plugin's own startJob ever
-    // creates (JOB_DOWNLOAD_CORE), so a single id/flag pair is enough --
-    // no need for a map keyed by jobId.
-    @Volatile private var activeDownloadJobId: String? = null
-    @Volatile private var cancelRequested: Boolean = false
 
     override fun onLoad(context: PluginContext) {
         this.context = context
@@ -61,13 +56,12 @@ class RetroArchPlugin : DroidtopPlugin {
         if (capability != PluginCapability.APP_STATUS || args.string("job") != JOB_DOWNLOAD_CORE) {
             throw UnsupportedOperationException("RetroArchPlugin only supports the '$JOB_DOWNLOAD_CORE' job under app_status")
         }
-        activeDownloadJobId = jobId
-        cancelRequested = false
-        runDownloadCoreJob(args, progress)
+        cancelledJobs.remove(jobId)
+        runDownloadCoreJob(jobId, args, progress)
     }
 
     override fun cancelJob(jobId: String) {
-        if (jobId == activeDownloadJobId) cancelRequested = true
+        cancelledJobs.add(jobId)
     }
 
     // ---------------------------------------------------------------
@@ -215,7 +209,7 @@ class RetroArchPlugin : DroidtopPlugin {
     // Core download (buildbot.libretro.com, DESIGN.md 6-7)
     // ---------------------------------------------------------------
 
-    private fun runDownloadCoreJob(args: PluginArgs, progress: PluginJobProgress) {
+    private fun runDownloadCoreJob(jobId: String, args: PluginArgs, progress: PluginJobProgress) {
         val core = args.string("core")
         if (core.isNullOrBlank()) {
             progress.complete(PluginResult.failure("missing 'core' arg (e.g. 'snes9x')"))
@@ -228,14 +222,23 @@ class RetroArchPlugin : DroidtopPlugin {
         }
         progress.report(0, "Downloading $core for $abi from buildbot.libretro.com")
         val destDir = File(context.privateDataDir(), "cores/$abi").apply { mkdirs() }
-        val zipFile = File(destDir, core + "_libretro_android.so.zip")
+        // Staged per-jobId so two concurrent downloads (different cores, or -- as seen live on
+        // the rig -- the same core started twice) never share a zip/so path and race each
+        // other's delete()/read(); only the FINAL soFile name is shared, and it is only ever
+        // reached by an atomic rename once a job's own download+extract fully succeeds.
+        val zipFile = File(destDir, "$core.$jobId.so.zip")
+        val stagedSo = File(destDir, "$core.$jobId.so")
         val soFile = File(destDir, core + "_libretro_android.so")
 
         try {
-            downloadWithProgress(coreZipUrl(abi, core), zipFile) { pct -> progress.report(pct, "Downloading ($pct%)") }
+            downloadWithProgress(jobId, coreZipUrl(abi, core), zipFile) { pct -> progress.report(pct, "Downloading ($pct%)") }
             progress.report(95, "Verifying archive")
-            extractSingleSo(zipFile, soFile)
+            extractSingleSo(zipFile, stagedSo)
             zipFile.delete()
+            if (!stagedSo.renameTo(soFile)) {
+                stagedSo.copyTo(soFile, overwrite = true)
+                stagedSo.delete()
+            }
 
             val values = mutableMapOf(
                 "core" to core,
@@ -261,7 +264,10 @@ class RetroArchPlugin : DroidtopPlugin {
             progress.complete(PluginResult.success(values))
         } catch (t: Throwable) {
             zipFile.delete()
+            stagedSo.delete()
             progress.complete(PluginResult.failure(t.message ?: "core download failed"))
+        } finally {
+            cancelledJobs.remove(jobId)
         }
     }
 
@@ -291,7 +297,7 @@ class RetroArchPlugin : DroidtopPlugin {
     private fun coreZipUrl(abi: String, core: String): String =
         "$BUILDBOT_BASE/$abi/" + core + "_libretro_android.so.zip"
 
-    private fun downloadWithProgress(url: String, dest: File, onProgress: (Int) -> Unit) {
+    private fun downloadWithProgress(jobId: String, url: String, dest: File, onProgress: (Int) -> Unit) {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 30_000
@@ -312,7 +318,7 @@ class RetroArchPlugin : DroidtopPlugin {
                     // whole file's worth) so a cancel actually stops the
                     // transfer promptly instead of only being honored
                     // between whole downloads.
-                    if (cancelRequested) throw CancellationException("download cancelled")
+                    if (jobId in cancelledJobs) throw CancellationException("download cancelled")
                     val n = input.read(buffer)
                     if (n < 0) break
                     output.write(buffer, 0, n)

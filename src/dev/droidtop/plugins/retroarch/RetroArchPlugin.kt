@@ -151,14 +151,28 @@ class RetroArchPlugin : DroidtopPlugin {
         else -> PluginReply.error(PluginErrorCode.UNSUPPORTED, "Unsupported op: ${call.op}")
     }
 
-    private fun model(): PanelModel = PanelModel(
-        installedPackage = detectInstalledPackage(),
-        systems = state.systems(),
-        downloaded = listDownloadedCores().toSet(),
-        inRetroArch = state.scan()?.cores,
-        elevated = elevatedAvailable(),
-        settings = state.settings(),
-    )
+    private fun model(): PanelModel {
+        val fromLibrary = librarySystems()
+        return PanelModel(
+            installedPackage = detectInstalledPackage(),
+            systems = fromLibrary ?: state.systems(),
+            systemsFromLibrary = fromLibrary != null,
+            downloaded = listDownloadedCores().toSet(),
+            inRetroArch = state.scan()?.cores,
+            elevated = elevatedAvailable(),
+            settings = state.settings(),
+        )
+    }
+
+    /**
+     * Every system droidtop has games for that RetroArch plays (`library.read` `systems`, docs/plugin-api.md A1), or
+     * null when droidtop did not give the list: the user has not allowed "See your library", this droidtop predates the
+     * call, or its library is not loaded yet. The panel then shows the systems heard through the event instead.
+     */
+    private fun librarySystems(): List<SystemCore>? = runCatching {
+        val reply = JSONObject(context.call("library.read", 1, "systems", "{}"))
+        if (!reply.optBoolean("ok")) null else LibrarySystems.retroArchSystems(reply.optJSONObject("data"), RETROARCH_PACKAGES)
+    }.getOrNull()
 
     private fun save(values: JSONObject?): PluginReply {
         val current = state.settings()

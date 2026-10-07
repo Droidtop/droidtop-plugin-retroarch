@@ -8,6 +8,8 @@ internal data class PanelModel(
     /** The installed RetroArch package, or null. */
     val installedPackage: String?,
     val systems: List<SystemCore>,
+    /** True when [systems] is droidtop's own list of every system with games, false when it is only the ones heard through the event. */
+    val systemsFromLibrary: Boolean,
     /** Cores this plugin downloaded. */
     val downloaded: Set<String>,
     /** Cores found in RetroArch's own folder at the last look, or null when the user has not looked. */
@@ -50,7 +52,14 @@ internal object RetroArchViews {
                 "source", "Where cores come from", "buildbot.libretro.com",
                 "Downloaded straight from libretro's build server, the same place RetroArch's own Online Updater uses.",
             ),
-            info("systems", "Systems seen", m.systems.size.toString(), "Systems you chose RetroArch for since this plugin was installed."),
+            info(
+                "systems", if (m.systemsFromLibrary) "Systems with RetroArch" else "Systems seen", m.systems.size.toString(),
+                if (m.systemsFromLibrary) {
+                    "Every system you have games for that RetroArch launches."
+                } else {
+                    "Systems you chose RetroArch for since this plugin was installed. Allow \"See your library\" for this plugin to list them all."
+                },
+            ),
         ),
     )
 
@@ -87,7 +96,11 @@ internal object RetroArchViews {
             listOf(
                 info(
                     "no_systems", "No systems yet", null,
-                    "Choose RetroArch as the player for a system and it appears here with its core.",
+                    if (m.systemsFromLibrary) {
+                        "None of your systems launches with RetroArch. Choose it as the player for a system and it appears here with its core."
+                    } else {
+                        "Choose RetroArch as the player for a system and it appears here with its core. Allow \"See your library\" for this plugin to list every system."
+                    },
                 ),
             )
         }.toMutableList()

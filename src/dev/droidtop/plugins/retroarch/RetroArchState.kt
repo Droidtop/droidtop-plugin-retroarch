@@ -20,9 +20,10 @@ internal data class CoreScan(val pkg: String, val cores: Set<String>)
 
 /**
  * The plugin's small files, all in its private data directory (nothing leaves the device): its settings, the systems
- * droidtop has said RetroArch plays, and the last look into RetroArch's cores folder. droidtop gives a plugin no way to
- * list the user's systems (the library API is not built), so the systems are the ones it has heard about from
- * `library.default_player_changed`, which fires when a player is chosen for a system.
+ * droidtop has said RetroArch plays, and the last look into RetroArch's cores folder. When the user has allowed "See
+ * your library" the panel lists the systems droidtop itself reports ([LibrarySystems]); the systems kept here are the
+ * fallback for when it has not: the ones heard about from `library.default_player_changed`, which fires when a player
+ * is chosen for a system.
  */
 internal class RetroArchState(private val dir: File) {
     @Synchronized
@@ -90,6 +91,31 @@ internal class RetroArchState(private val dir: File) {
         const val SETTINGS = "settings.json"
         const val SYSTEMS = "systems.json"
         const val SCAN = "retroarch_cores.json"
+    }
+}
+
+/**
+ * droidtop's answer to `library.read` `systems` (docs/plugin-api.md A1): every system the user has games for with the
+ * emulator a launch would use. Only the systems RetroArch plays matter here, read the same way the event is: by the
+ * player's package.
+ */
+internal object LibrarySystems {
+    /**
+     * The RetroArch systems in [data], or null when the answer is not a complete list (droidtop said `ready: false`, or
+     * sent no `systems`), so the caller keeps the event-fed list instead of showing an empty one.
+     */
+    fun retroArchSystems(data: JSONObject?, retroArchPackages: Collection<String>): List<SystemCore>? {
+        if (data == null || !data.optBoolean("ready", false)) return null
+        val rows = data.optJSONArray("systems") ?: return null
+        return buildList {
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+                val id = row.optString("id")
+                val playerPackage = row.optString("playerPackage")
+                if (id.isBlank() || playerPackage !in retroArchPackages) continue
+                add(SystemCore(id, row.optString("name").ifBlank { id }, row.optString("core"), playerPackage))
+            }
+        }.sortedBy { it.name.lowercase() }
     }
 }
 

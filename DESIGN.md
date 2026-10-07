@@ -277,11 +277,14 @@ plugin returns) is the plugin's control point: RetroArch's status and an Open
 button; one row per system the user chose RetroArch for with its core and
 whether the core is in RetroArch, only downloaded, or missing, and a press that
 downloads (and with the helper installs) it; a "Core name" field with
-"Download and install"; and the two settings. droidtop gives a plugin no way to
-list the user's systems yet (its library API is not built), so the systems on
-the panel are the ones droidtop has reported through
-`library.default_player_changed` since the plugin was installed; a system
-whose player moves away from RetroArch leaves the list.
+"Download and install"; and the two settings. With the optional `library.read`
+permission the systems on the panel are droidtop's own list (`library.read`
+`systems`, droidtop docs/plugin-api.md A1: every system with games and the
+emulator and core a launch would use), filtered to the ones whose player is a
+RetroArch package. Without it, or on a droidtop that predates the call, they
+are the ones droidtop has reported through `library.default_player_changed`
+since the plugin was installed; a system whose player moves away from
+RetroArch leaves that list.
 
 Every root-only action above has the non-root fallback stated next to it
 in the settings row copy, per the owner's "core function must keep

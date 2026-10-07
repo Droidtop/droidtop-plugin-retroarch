@@ -2,8 +2,8 @@
   "id": "droidtop.retroarch",
   "origin": "droidtop",
   "label": "RetroArch manager",
-  "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and (with a root helper plugin you allow) puts them into RetroArch's own cores folder. Its Quick Menu panel shows RetroArch's status, the cores for your systems and the install action. See DESIGN.md for the source citations behind every claim this plugin makes.",
-  "version": "1.1.0",
+  "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and (with a root helper plugin you allow) puts them into RetroArch's own cores folder. Its Quick Menu panel shows RetroArch's status, the cores for every system you play with it and the install action. See DESIGN.md for the source citations behind every claim this plugin makes.",
+  "version": "1.2.0",
   "kind": "native_bundle",
   "contractVersion": 2,
   "provides": [
@@ -17,6 +17,7 @@
     {"id": "apps.launch", "reason": "Opens RetroArch from its panel"},
     {"id": "apps.intents.out", "packages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"], "reason": "Starts RetroArch with the core and game you chose"},
     {"id": "net.domains", "domains": ["buildbot.libretro.com"], "reason": "Downloads cores from libretro's build server"},
+    {"id": "library.read", "reason": "Lists your systems and which of them RetroArch launches, so its panel shows every system and not only the ones you changed", "required": false},
     {"id": "priv.shell.root", "reason": "Puts a downloaded core into RetroArch's own cores folder, which only root can reach. Optional: without it you install the core from RetroArch itself.", "required": false}
   ],
   "requires": [

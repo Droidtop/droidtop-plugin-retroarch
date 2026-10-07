@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-10-07
+
+### Added
+- The panel lists every system you have games for that RetroArch launches, with the core each one needs. It asks droidtop for the list (`library.read`: the system names, the emulator and core chosen for each, never your games), where before it only knew the systems you had changed the player of since installing it.
+
+### Changed
+- New access, shown on the approval list when you update: `library.read` ("See your library: games, apps and systems"). It is optional. Without it the panel keeps working from the systems droidtop tells it about when you choose a player, and says that allowing it lists them all.
+- Needs a droidtop that answers `library.read` `systems`; on an older one the panel falls back the same way.
+
+### Needs a rig check
+- Allow "See your library" for the plugin, open its panel and confirm every system that has games and uses RetroArch is listed, including one whose player you never changed. Turn the permission off and confirm the panel still opens with the shorter list.
+
 ## [1.1.0] - 2026-10-07
 
 ### Added

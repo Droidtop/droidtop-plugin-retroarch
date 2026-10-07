@@ -249,21 +249,39 @@ because that is the only place this plugin can write without root (§3).
   how droidtop's own JSON `acquire_content` writes into a library
   folder, §12).
 
-**With root/Shizuku approved (`requestsRoot: true`, `hasRootApproval()`),
-enhancement only:**
+**With a root helper plugin the user allowed (contract 2, 1.1.0), enhancement
+only.** The plugin never runs `su` and never asks droidtop for a root tick
+(`requestsRoot` is false). It declares an optional `requires` on `priv.shell`
+at root level and the permission `priv.shell.root`, and calls the helper
+through droidtop's broker (`host.call("priv.shell", "exec", {argv})`,
+droidtop `docs/plugin-api.md` 2.7), which runs each command directly, without
+a shell, as root. That is the only way the plugin reaches RetroArch's private
+folder, and every step below is one such command:
 
-- Copy a downloaded core `.so` from the plugin's private dir straight
-  into RetroArch's real `cores` dir (`/data/data/<pkg>/cores/` or
-  `/data/user/0/<pkg>/cores/`) via `su -c cp`, so `LIBRETRO` launches and
-  RetroArch's own core list both see it immediately — the one thing that
-  is a real functional gap non-root.
-- List RetroArch's actually-installed cores/info files by reading its
-  private dir directly (`su -c ls`), instead of the non-root fallback of
-  only tracking what THIS plugin itself downloaded.
-- Same root path for pushing updated `database/rdb` and `info` files
-  from a buildbot `.zip` (`assets/frontend/info.zip`,
-  `assets/frontend/database-rdb.zip` — the same two archives RetroArch's
-  own updater fetches for "Update Core Info Files" / "Update Databases").
+- Put a downloaded core into RetroArch's real `cores` dir
+  (`/data/data/<pkg>/cores/`): `mkdir -p`, `cp`, then `stat -c %u:%g` on
+  `/data/data/<pkg>` and `chown` of the copy to that owner, `chmod 755` and
+  `restorecon`. The chown is the part the earlier `su -c cp` left out: a file
+  root copied is root's, and RetroArch's own user could not read it, so
+  `LIBRETRO` and RetroArch's core list could not load it. Not yet run on a
+  device; a rig check covers it (see the 1.1.0 changelog entry).
+- List what RetroArch's cores folder holds (`ls`), when the user presses
+  "Check what RetroArch has" on the panel, so the panel can say which cores
+  are in RetroArch, instead of only the ones this plugin downloaded.
+- Pushing updated `database/rdb` and `info` files from buildbot `.zip`s
+  (`assets/frontend/info.zip`, `assets/frontend/database-rdb.zip`) is the same
+  helper path; this plugin does not do it yet.
+
+The Quick Menu panel (droidtop `ui.panel`, drawn by droidtop from the view the
+plugin returns) is the plugin's control point: RetroArch's status and an Open
+button; one row per system the user chose RetroArch for with its core and
+whether the core is in RetroArch, only downloaded, or missing, and a press that
+downloads (and with the helper installs) it; a "Core name" field with
+"Download and install"; and the two settings. droidtop gives a plugin no way to
+list the user's systems yet (its library API is not built), so the systems on
+the panel are the ones droidtop has reported through
+`library.default_player_changed` since the plugin was installed; a system
+whose player moves away from RetroArch leaves the list.
 
 Every root-only action above has the non-root fallback stated next to it
 in the settings row copy, per the owner's "core function must keep

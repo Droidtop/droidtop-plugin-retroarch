@@ -2,13 +2,31 @@
   "id": "droidtop.retroarch",
   "origin": "droidtop",
   "label": "RetroArch manager",
-  "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and updates cheats in shared storage. See DESIGN.md for the source citations behind every claim this plugin makes.",
-  "version": "1.0.0",
+  "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and (with a root helper plugin you allow) puts them into RetroArch's own cores folder. Its Quick Menu panel shows RetroArch's status, the cores for your systems and the install action. See DESIGN.md for the source citations behind every claim this plugin makes.",
+  "version": "1.1.0",
   "kind": "native_bundle",
-  "capabilities": ["app_status", "status_tile", "settings_rows"],
-  "subscribedEvents": ["default_player_changed"],
-  "contractVersion": 1,
-  "requestsRoot": true,
+  "contractVersion": 2,
+  "provides": [
+    {"point": "ui.panel", "version": 1, "label": "RetroArch"},
+    {"point": "ui.status_tile", "version": 1, "id": "state", "label": "RetroArch", "surfaces": ["gaming.quick_menu"]},
+    {"point": "ui.settings", "version": 1, "target": "plugin"},
+    {"point": "apps.bridge", "version": 1}
+  ],
+  "permissions": [
+    {"id": "apps.check", "packages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"], "reason": "Finds out which RetroArch you have installed"},
+    {"id": "apps.launch", "reason": "Opens RetroArch from its panel"},
+    {"id": "apps.intents.out", "packages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"], "reason": "Starts RetroArch with the core and game you chose"},
+    {"id": "net.domains", "domains": ["buildbot.libretro.com"], "reason": "Downloads cores from libretro's build server"},
+    {"id": "priv.shell.root", "reason": "Puts a downloaded core into RetroArch's own cores folder, which only root can reach. Optional: without it you install the core from RetroArch itself.", "required": false}
+  ],
+  "requires": [
+    {"api": "priv.shell", "version": "1.0", "optional": true, "minLevel": "root", "reason": "Puts a downloaded core into RetroArch's own cores folder"}
+  ],
+  "subscribes": [
+    {"event": "library.default_player_changed", "version": 2}
+  ],
+  "subscribedEvents": ["library.default_player_changed"],
+  "requestsRoot": false,
   "abis": [],
   "entryClass": "dev.droidtop.plugins.retroarch.RetroArchPlugin"
 }

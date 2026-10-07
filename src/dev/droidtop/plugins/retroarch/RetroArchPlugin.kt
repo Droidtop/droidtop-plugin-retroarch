@@ -1,63 +1,92 @@
 package dev.droidtop.plugins.retroarch
 
+import android.os.Build
 import dev.droidtop.pluginhost.DroidtopPlugin
+import dev.droidtop.pluginhost.LegacyHandle
 import dev.droidtop.pluginhost.PluginArgs
+import dev.droidtop.pluginhost.PluginCall
 import dev.droidtop.pluginhost.PluginCapability
 import dev.droidtop.pluginhost.PluginContext
+import dev.droidtop.pluginhost.PluginErrorCode
 import dev.droidtop.pluginhost.PluginEvent
 import dev.droidtop.pluginhost.PluginJobProgress
+import dev.droidtop.pluginhost.PluginReply
 import dev.droidtop.pluginhost.PluginResult
-import android.os.Build
 import java.io.File
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.URL
-import java.util.zip.ZipInputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.ZipInputStream
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
- * Integrates an installed RetroArch into droidtop (docs/SPEC.md 12a).
- * Every fact this class relies on -- package ids, Intent extras, the
- * network command port and its commands, buildbot's layout, which
- * directories are app-private vs. shared storage -- is cited against
- * RetroArch's own source in this repo's DESIGN.md; nothing here is
- * guessed.
+ * Integrates an installed RetroArch into droidtop (docs/SPEC.md 12a). Every fact this class relies on -- package ids,
+ * Intent extras, the network command port and its commands, buildbot's layout, which directories are app-private vs.
+ * shared storage -- is cited against RetroArch's own source in this repo's DESIGN.md; nothing here is guessed.
  *
- * Root (`requestsRoot: true` in manifest.template.json) is an
- * enhancement only: every action below has a non-root path documented
- * in DESIGN.md 7, and this class never throws just because
- * [PluginContext.hasRootApproval] is false.
+ * Contract 2 (docs/plugin-api.md): the plugin's control point is its Quick Menu panel (`ui.panel`), drawn by droidtop
+ * from the view [RetroArchViews] returns, with a settings page (`ui.settings`), a status tile and the app bridge
+ * (`apps.bridge`) behind it. Getting a core into RetroArch's own folder is something only root can do, and the plugin
+ * never runs `su`: it asks a root helper plugin the user allowed (`priv.shell`, optional, docs/plugin-api.md 2.7), and
+ * does less when there is none -- it never throws just because there is no helper.
  */
-/** Thrown from inside the download loop when DroidtopPlugin.cancelJob asked this job to stop -- caught in runDownloadCoreJob, same as any other download failure. */
+/** Thrown from inside the download loop when DroidtopPlugin.cancelJob asked this job to stop -- caught in runInstallCoreJob, same as any other download failure. */
 private class CancellationException(message: String) : Exception(message)
 
 class RetroArchPlugin : DroidtopPlugin {
-    // Cancellation keyed by jobId, not one flag -- concurrent download_core jobs really do happen.
+    // Cancellation keyed by jobId, not one flag -- concurrent install_core jobs really do happen.
     // A shared flag would let cancelling one job silently cancel every other job in flight too;
     // each jobId gets its own entry here, checked from inside that job's own download loop.
     private val cancelledJobs = ConcurrentHashMap.newKeySet<String>()
     private lateinit var context: PluginContext
-
+    private lateinit var state: RetroArchState
 
     override fun onLoad(context: PluginContext) {
         this.context = context
+        this.state = RetroArchState(File(context.privateDataDir()))
     }
 
     override fun invoke(capability: PluginCapability, args: PluginArgs): PluginResult = when (capability) {
         PluginCapability.APP_STATUS -> handleAppStatus(args)
         PluginCapability.STATUS_TILE -> handleStatusTile()
-        PluginCapability.SETTINGS_ROWS -> handleSettingsRows()
         else -> PluginResult.failure("RetroArchPlugin does not implement ${capability.id}")
     }
 
+    /**
+     * The contract 2 entry point: the panel and the settings page are this plugin's own; the status tile and the app
+     * bridge are still the contract 1 capabilities they replaced, served through [invoke] by the host's translation.
+     */
+    override fun handle(call: PluginCall): PluginReply = when (call.point) {
+        POINT_PANEL, POINT_SETTINGS -> handlePage(call)
+        else -> LegacyHandle.translate(this, call)
+    }
+
     override fun startJob(jobId: String, capability: PluginCapability, args: PluginArgs, progress: PluginJobProgress) {
-        if (capability != PluginCapability.APP_STATUS || args.string("job") != JOB_DOWNLOAD_CORE) {
-            throw UnsupportedOperationException("RetroArchPlugin only supports the '$JOB_DOWNLOAD_CORE' job under app_status")
+        val envelope = args.string("call")?.let { PluginCall.fromJson(it) }
+        val core: String?
+        val automatic: Boolean
+        if (envelope != null) {
+            if (envelope.op != RetroArchViews.OP_INSTALL_CORE) {
+                throw UnsupportedOperationException("RetroArchPlugin only supports the '${RetroArchViews.OP_INSTALL_CORE}' job from its pages")
+            }
+            // A core named by a row, else the one typed into the "Core name" field.
+            val values = envelope.args.optJSONObject("values")
+            core = envelope.args.optString("core").ifBlank { values?.optString(RetroArchViews.INPUT_CORE_NAME).orEmpty() }.trim()
+            automatic = false
+        } else {
+            if (capability != PluginCapability.APP_STATUS || args.string("job") != JOB_DOWNLOAD_CORE) {
+                throw UnsupportedOperationException("RetroArchPlugin only supports the '$JOB_DOWNLOAD_CORE' job under app_status")
+            }
+            core = args.string("core")?.trim()
+            // Set by onEvent: a download droidtop started for the user, not one the user asked for.
+            automatic = args.string("auto") == "true"
         }
         cancelledJobs.remove(jobId)
-        runDownloadCoreJob(jobId, args, progress)
+        runInstallCoreJob(jobId, core, automatic, progress)
     }
 
     override fun cancelJob(jobId: String) {
@@ -69,32 +98,140 @@ class RetroArchPlugin : DroidtopPlugin {
     // ---------------------------------------------------------------
 
     /**
-     * Reacts to [PluginEvent.DEFAULT_PLAYER_CHANGED] (this plugin's own
-     * subscription, manifest.template.json's `subscribedEvents`): when
-     * droidtop just made an installed RetroArch the default player for a
-     * system that names a core, and that core isn't downloaded yet, asks
-     * droidtop to start [JOB_DOWNLOAD_CORE] for it -- the real,
-     * cited reason this plugin needed the event mechanism built at all
-     * (droidtop docs/SPEC.md 12a). No-ops (plain success, no `startJob`)
-     * for every other case: RetroArch not installed, the event naming a
-     * different player's package, no core configured for that system, or
-     * the core already downloaded.
+     * Reacts to [PluginEvent.DEFAULT_PLAYER_CHANGED] (this plugin's own subscription): remembers which systems
+     * RetroArch plays, for the panel, and when droidtop just made an installed RetroArch the default player for a
+     * system that names a core, and that core isn't downloaded yet, asks droidtop to start [JOB_DOWNLOAD_CORE] for it
+     * -- the real, cited reason this plugin needed the event mechanism built at all (droidtop docs/SPEC.md 12a). That
+     * last part follows the "Download a core when you choose RetroArch" switch. No-ops (plain success, no `startJob`)
+     * for every other case: RetroArch not installed, the event naming a different player's package, no core
+     * configured for that system, or the core already downloaded.
      */
     override fun onEvent(event: PluginEvent, args: PluginArgs): PluginResult {
         if (event != PluginEvent.DEFAULT_PLAYER_CHANGED) return PluginResult.success()
-        val installed = detectInstalledPackage() ?: return PluginResult.success()
+        val systemId = args.string("systemId").orEmpty()
         val playerPackage = args.string("playerPackage").orEmpty()
+        val installed = detectInstalledPackage()
+        // The panel lists the systems RetroArch plays; a system that moved to another player leaves the list.
+        if (systemId.isNotBlank()) {
+            if (playerPackage in RETROARCH_PACKAGES) {
+                state.rememberSystem(SystemCore(systemId, args.string("systemName").orEmpty().ifBlank { systemId }, args.string("core").orEmpty(), playerPackage))
+            } else {
+                state.forgetSystem(systemId)
+            }
+        }
+        installed ?: return PluginResult.success()
         if (playerPackage != installed) return PluginResult.success()
         val core = args.string("core").orEmpty()
-        if (core.isBlank()) return PluginResult.success()
+        if (core.isBlank() || !RetroArchCores.isValidName(core)) return PluginResult.success()
+        if (!state.settings().autoDownload) return PluginResult.success(mapOf("note" to "automatic downloads are off"))
         if (core in listDownloadedCores()) return PluginResult.success(mapOf("note" to "core '$core' already downloaded"))
         return PluginResult.success(
             mapOf(
                 "startJob" to PluginCapability.APP_STATUS.id,
                 "job" to JOB_DOWNLOAD_CORE,
                 "core" to core,
+                "auto" to "true",
             ),
         )
+    }
+
+    // ---------------------------------------------------------------
+    // The panel and the settings page (ui.panel, ui.settings)
+    // ---------------------------------------------------------------
+
+    private fun handlePage(call: PluginCall): PluginReply = when (call.op) {
+        "panel" -> PluginReply.ok(RetroArchViews.panel(model()))
+        "view" -> PluginReply.ok(RetroArchViews.settingsPage(model()))
+        RetroArchViews.OP_SAVE -> save(call.args.optJSONObject("values"))
+        RetroArchViews.OP_LAUNCH -> {
+            val result = launch(PluginArgs(emptyMap()))
+            if (result.ok) PluginReply.ok(JSONObject().put("message", "Opening RetroArch")) else PluginReply.error(PluginErrorCode.FAILED, result.error ?: "RetroArch did not open")
+        }
+        RetroArchViews.OP_SCAN -> scanRetroArch()
+        else -> PluginReply.error(PluginErrorCode.UNSUPPORTED, "Unsupported op: ${call.op}")
+    }
+
+    private fun model(): PanelModel = PanelModel(
+        installedPackage = detectInstalledPackage(),
+        systems = state.systems(),
+        downloaded = listDownloadedCores().toSet(),
+        inRetroArch = state.scan()?.cores,
+        elevated = elevatedAvailable(),
+        settings = state.settings(),
+    )
+
+    private fun save(values: JSONObject?): PluginReply {
+        val current = state.settings()
+        fun flag(key: String, fallback: Boolean): Boolean = when (values?.optString(key)) {
+            "true" -> true
+            "false" -> false
+            else -> fallback
+        }
+        state.saveSettings(
+            RetroArchSettings(
+                autoDownload = flag(RetroArchViews.TOGGLE_AUTO_DOWNLOAD, current.autoDownload),
+                autoInstall = flag(RetroArchViews.TOGGLE_AUTO_INSTALL, current.autoInstall),
+            ),
+        )
+        return PluginReply.ok(JSONObject().put("message", "Saved"))
+    }
+
+    // ---------------------------------------------------------------
+    // The elevated path: a root helper plugin, never `su` (docs/plugin-api.md 2.7)
+    // ---------------------------------------------------------------
+
+    /** True while a running plugin offers `priv.shell` at root level. Harmless to ask: it needs no grant. */
+    private fun elevatedAvailable(): Boolean = runCatching {
+        val reply = JSONObject(context.call("plugins", 1, "available", JSONObject().put("api", "priv.shell").put("minLevel", "root").toString()))
+        reply.optBoolean("ok") && reply.optJSONObject("data")?.optBoolean("available") == true
+    }.getOrDefault(false)
+
+    /** One command through the helper, run directly (no shell). [error] is why it could not run at all, e.g. the user has not allowed root yet. */
+    private class Exec(val exit: Int, val stdout: String, val stderr: String, val error: String?) {
+        val ok: Boolean get() = error == null && exit == 0
+        fun why(): String = error ?: stderr.trim().ifEmpty { "exit $exit" }
+    }
+
+    private fun exec(vararg argv: String): Exec = runCatching {
+        val reply = JSONObject(context.call("priv.shell", 1, "exec", JSONObject().put("argv", JSONArray(argv.toList())).toString()))
+        if (!reply.optBoolean("ok")) {
+            Exec(-1, "", "", reply.optJSONObject("error")?.optString("message")?.ifBlank { null } ?: "the root helper refused")
+        } else {
+            val data = reply.optJSONObject("data") ?: JSONObject()
+            Exec(data.optInt("exit", -1), data.optString("stdout"), data.optString("stderr"), null)
+        }
+    }.getOrElse { Exec(-1, "", "", it.message ?: "the root helper could not be reached") }
+
+    /** RetroArch's own cores folder (DESIGN.md 7): app-private, so only the helper reaches it. */
+    private fun coresDir(pkg: String) = "/data/data/$pkg/cores"
+
+    /** The "Check what RetroArch has" button: lists RetroArch's cores folder through the helper and keeps the answer for the panel. */
+    private fun scanRetroArch(): PluginReply {
+        val pkg = detectInstalledPackage() ?: return PluginReply.error(PluginErrorCode.FAILED, "RetroArch is not installed")
+        val listing = exec("ls", coresDir(pkg))
+        if (!listing.ok) return PluginReply.error(PluginErrorCode.FAILED, "Could not look in RetroArch's cores folder: ${listing.why()}")
+        val cores = listing.stdout.lineSequence().mapNotNull { RetroArchCores.nameOf(it.trim()) }.toSet()
+        state.saveScan(CoreScan(pkg, cores))
+        return PluginReply.ok(JSONObject().put("message", "RetroArch has ${cores.size} core(s)"))
+    }
+
+    /**
+     * Puts [soFile] into RetroArch's cores folder as root and gives it the same owner RetroArch's own files have, which
+     * is what lets RetroArch load it (a file copied by root is root's, and RetroArch's user cannot read it). Each step
+     * stops the install at its own error; the file is still downloaded for the manual way (DESIGN.md 7).
+     */
+    private fun installAsRoot(pkg: String, core: String, soFile: File): String? {
+        val dir = coresDir(pkg)
+        val dest = "$dir/${RetroArchCores.fileName(core)}"
+        exec("mkdir", "-p", dir).takeIf { !it.ok }?.let { return "could not create RetroArch's cores folder: ${it.why()}" }
+        exec("cp", soFile.absolutePath, dest).takeIf { !it.ok }?.let { return "could not copy the core: ${it.why()}" }
+        val owner = exec("stat", "-c", "%u:%g", "/data/data/$pkg")
+        if (!owner.ok || !OWNER.matches(owner.stdout.trim())) return "could not read RetroArch's user: ${owner.why()}"
+        exec("chown", owner.stdout.trim(), dest).takeIf { !it.ok }?.let { return "could not give the core to RetroArch: ${it.why()}" }
+        exec("chmod", "755", dest).takeIf { !it.ok }?.let { return "could not make the core loadable: ${it.why()}" }
+        // The label a new file in an app's folder should carry; a device without restorecon simply keeps the inherited one.
+        exec("restorecon", dest)
+        return null
     }
 
     // ---------------------------------------------------------------
@@ -112,8 +249,7 @@ class RetroArchPlugin : DroidtopPlugin {
         val installed = detectInstalledPackage()
         val values = mutableMapOf(
             "installed" to (installed != null).toString(),
-            "rootApproved" to context.hasRootApproval().toString(),
-            "shizukuAvailable" to context.hasShizukuAccess().toString(),
+            "elevatedInstall" to elevatedAvailable().toString(),
         )
         installed?.let {
             values["package"] = it
@@ -138,8 +274,7 @@ class RetroArchPlugin : DroidtopPlugin {
      * product flavors): the 64-bit-only build first, then 32-bit, then
      * the universal/Play Store id last since it is the least specific.
      */
-    private fun detectInstalledPackage(): String? =
-        listOf(PACKAGE_AARCH64, PACKAGE_RA32, PACKAGE_UNIVERSAL).firstOrNull { context.isAppInstalled(it) }
+    private fun detectInstalledPackage(): String? = RETROARCH_PACKAGES.firstOrNull { context.isAppInstalled(it) }
 
     /**
      * Launches RetroArch with whatever of ROM/LIBRETRO/CONFIGFILE the
@@ -165,16 +300,14 @@ class RetroArchPlugin : DroidtopPlugin {
     }
 
     /**
-     * DESIGN.md 2: droidtop's plugin-host now ships
-     * PluginContext.launchAppWithExtras (merged into Droidtop/droidtop
-     * main 2026-09-27, commit 87fccc4c), so RetroArch's own ROM/LIBRETRO/
-     * CONFIGFILE extras attach directly -- no more reflection bridge.
+     * DESIGN.md 2: droidtop's plugin-host ships PluginContext.launchAppWithExtras, so RetroArch's own
+     * ROM/LIBRETRO/CONFIGFILE extras attach directly -- no reflection bridge.
      */
     private fun launchWithExtras(pkg: String, extras: Map<String, String>): Boolean =
         if (extras.isEmpty()) context.launchApp(pkg) else context.launchAppWithExtras(pkg, extras)
 
     // ---------------------------------------------------------------
-    // status_tile / settings_rows
+    // status_tile
     // ---------------------------------------------------------------
 
     private fun handleStatusTile(): PluginResult {
@@ -186,33 +319,18 @@ class RetroArchPlugin : DroidtopPlugin {
         return PluginResult.success(mapOf("label" to "RetroArch", "value" to value))
     }
 
-    /**
-     * droidtop has no generic settings_rows renderer yet (SPEC.md 12a:
-     * built capabilities list does not include a settings_rows consumer
-     * screen) -- there is no richer row schema to target yet, so this
-     * returns the same flat label/value shape status_tile already uses,
-     * one row per fact, keyed so a future renderer can tell them apart.
-     * Kept intentionally simple rather than inventing a schema droidtop
-     * itself has not decided on.
-     */
-    private fun handleSettingsRows(): PluginResult {
-        val installed = detectInstalledPackage()
-        val values = mutableMapOf(
-            "row_retroarch" to (installed?.let { "RetroArch: installed ($it)" } ?: "RetroArch: not installed"),
-            "row_root" to if (context.hasRootApproval()) "Root: approved, cores install directly" else "Root: not used, core installs go through RetroArch's own Online Updater",
-            "row_cores" to ("Downloaded by this plugin: " + listDownloadedCores().joinToString(", ").ifEmpty { "none" }),
-        )
-        return PluginResult.success(values)
-    }
-
     // ---------------------------------------------------------------
-    // Core download (buildbot.libretro.com, DESIGN.md 6-7)
+    // Core download and install (buildbot.libretro.com, DESIGN.md 6-7)
     // ---------------------------------------------------------------
 
-    private fun runDownloadCoreJob(jobId: String, args: PluginArgs, progress: PluginJobProgress) {
-        val core = args.string("core")
+    private fun runInstallCoreJob(jobId: String, core: String?, automatic: Boolean, progress: PluginJobProgress) {
         if (core.isNullOrBlank()) {
-            progress.complete(PluginResult.failure("missing 'core' arg (e.g. 'snes9x')"))
+            progress.complete(PluginResult.failure("missing core name (e.g. 'snes9x')"))
+            return
+        }
+        // The name goes into an address, a file name and helper commands: only a core's short name is accepted.
+        if (!RetroArchCores.isValidName(core)) {
+            progress.complete(PluginResult.failure("'$core' is not a core name (letters, digits, - and _ only)"))
             return
         }
         val abi = preferredAbi()
@@ -228,7 +346,7 @@ class RetroArchPlugin : DroidtopPlugin {
         // reached by an atomic rename once a job's own download+extract fully succeeds.
         val zipFile = File(destDir, "$core.$jobId.so.zip")
         val stagedSo = File(destDir, "$core.$jobId.so")
-        val soFile = File(destDir, core + "_libretro_android.so")
+        val soFile = File(destDir, RetroArchCores.fileName(core))
 
         try {
             downloadWithProgress(jobId, coreZipUrl(abi, core), zipFile) { pct -> progress.report(pct, "Downloading ($pct%)") }
@@ -245,21 +363,35 @@ class RetroArchPlugin : DroidtopPlugin {
                 "abi" to abi,
                 "path" to soFile.absolutePath,
             )
-
-            if (context.hasRootApproval()) {
-                progress.report(97, "Root approved: copying into RetroArch's own cores directory")
-                val pkg = detectInstalledPackage()
-                if (pkg != null && copyIntoRetroArchCoresDirAsRoot(pkg, soFile)) {
-                    values["installedIntoRetroArch"] = "true"
-                } else {
+            val pkg = detectInstalledPackage()
+            // A core a person asked for is always put in place when it can be; one droidtop fetched on its own follows the switch.
+            val install = !automatic || state.settings().autoInstall
+            when {
+                pkg == null -> {
                     values["installedIntoRetroArch"] = "false"
-                    values["note"] = "root copy failed or RetroArch not detected; core is still available at 'path' for the non-root LIBRETRO-extra fallback (see DESIGN.md 7)"
+                    values["note"] = "RetroArch is not installed; the core is downloaded and waits for it"
                 }
-            } else {
-                values["installedIntoRetroArch"] = "false"
-                values["note"] = "no root approval: open RetroArch's own Main Menu -> Online Updater -> Core Downloader for '$core', or approve root for this plugin to install it directly"
+                !install -> {
+                    values["installedIntoRetroArch"] = "false"
+                    values["note"] = "downloaded; putting cores into RetroArch automatically is off"
+                }
+                !elevatedAvailable() -> {
+                    values["installedIntoRetroArch"] = "false"
+                    values["note"] = "downloaded; no root helper is allowed, so open RetroArch's Main Menu, Online Updater, Core Downloader for '$core'"
+                }
+                else -> {
+                    progress.report(97, "Putting $core into RetroArch")
+                    val problem = installAsRoot(pkg, core, soFile)
+                    if (problem == null) {
+                        values["installedIntoRetroArch"] = "true"
+                        state.saveScan(CoreScan(pkg, (state.scan()?.takeIf { it.pkg == pkg }?.cores.orEmpty()) + core))
+                    } else {
+                        values["installedIntoRetroArch"] = "false"
+                        values["note"] = "downloaded, but $problem. Use RetroArch's Main Menu, Online Updater, Core Downloader for '$core'"
+                    }
+                }
             }
-
+            values["message"] = if (values["installedIntoRetroArch"] == "true") "$core is in RetroArch" else "$core downloaded"
             progress.report(100, "Done")
             progress.complete(PluginResult.success(values))
         } catch (t: Throwable) {
@@ -276,7 +408,7 @@ class RetroArchPlugin : DroidtopPlugin {
         if (!coresRoot.isDirectory) return emptyList()
         return coresRoot.listFiles { f -> f.isDirectory }.orEmpty()
             .flatMap { abiDir -> abiDir.listFiles { f -> f.name.endsWith("_libretro_android.so") }.orEmpty().toList() }
-            .map { it.name.removeSuffix("_libretro_android.so") }
+            .mapNotNull { RetroArchCores.nameOf(it.name) }
             .distinct()
             .sorted()
     }
@@ -295,7 +427,7 @@ class RetroArchPlugin : DroidtopPlugin {
     }
 
     private fun coreZipUrl(abi: String, core: String): String =
-        "$BUILDBOT_BASE/$abi/" + core + "_libretro_android.so.zip"
+        "$BUILDBOT_BASE/$abi/" + RetroArchCores.fileName(core) + ".zip"
 
     private fun downloadWithProgress(jobId: String, url: String, dest: File, onProgress: (Int) -> Unit) {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -355,25 +487,6 @@ class RetroArchPlugin : DroidtopPlugin {
         }
     }
 
-    /**
-     * Root-only enhancement (DESIGN.md 7): RetroArch's own cores dir is
-     * app-private (DEFAULT_DIR_CORE = app_dir/cores, platform_unix.c) and
-     * app_dir defaults to getApplicationInfo().dataDir -- /data/data/<pkg>
-     * or /data/user/0/<pkg> depending on the device (both point at the
-     * same inode; platform_unix.c's own comment gives
-     * "/data/user/0/com.retroarch.aarch64" as the real-world example).
-     * `su -c cp` is the only way another app's UID reaches that path.
-     */
-    private fun copyIntoRetroArchCoresDirAsRoot(pkg: String, soFile: File): Boolean = runCatching {
-        val destDir = "/data/data/$pkg/cores"
-        val safePath = soFile.absolutePath.replace("\"", "\\\"")
-        val shellCmd = "mkdir -p " + destDir + " && cp \"" + safePath + "\" " + destDir + "/"
-        val process = ProcessBuilder("su", "-c", shellCmd).start()
-        process.inputStream.bufferedReader().readText()
-        process.errorStream.bufferedReader().readText()
-        process.waitFor() == 0
-    }.getOrDefault(false)
-
     // ---------------------------------------------------------------
     // Network command interface (DESIGN.md 5)
     // ---------------------------------------------------------------
@@ -396,16 +509,23 @@ class RetroArchPlugin : DroidtopPlugin {
     }.getOrElse { PluginResult.failure(it.message ?: "failed to send network command (is RetroArch running with Network Commands enabled?)") }
 
     companion object {
-        // DESIGN.md 1 -- RetroArch's own pkg/android/phoenix/build.gradle product flavors.
+        private const val POINT_PANEL = "ui.panel"
+        private const val POINT_SETTINGS = "ui.settings"
+
+        // DESIGN.md 1 -- RetroArch's own pkg/android/phoenix/build.gradle product flavors, most specific first.
         private const val PACKAGE_AARCH64 = "com.retroarch.aarch64"
         private const val PACKAGE_RA32 = "com.retroarch.ra32"
         private const val PACKAGE_UNIVERSAL = "com.retroarch"
+        private val RETROARCH_PACKAGES = listOf(PACKAGE_AARCH64, PACKAGE_RA32, PACKAGE_UNIVERSAL)
 
         // DESIGN.md 6 -- config.def.h's DEFAULT_BUILDBOT_SERVER_URL, generalised across the per-ABI folders it names.
         private const val BUILDBOT_BASE = "https://buildbot.libretro.com/nightly/android/latest"
 
         // DESIGN.md 5 -- command.h's DEFAULT_NETWORK_CMD_PORT.
         private const val NETWORK_CMD_PORT = 55355
+
+        /** `stat -c %u:%g` of RetroArch's data folder: numbers only, so nothing else reaches `chown`. */
+        private val OWNER = Regex("^[0-9]+:[0-9]+$")
 
         const val JOB_DOWNLOAD_CORE = "download_core"
     }

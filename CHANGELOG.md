@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-10-07
+
+### Added
+- A Quick Menu panel (droidtop contract 2 `ui.panel`): RetroArch's status with an Open button, a row for each system you chose RetroArch for showing its core and whether that core is in RetroArch, only downloaded or missing, a press on a row to download and install it, a "Core name" field with Download and install, and the plugin's settings.
+- "Check what RetroArch has", which lists RetroArch's own cores folder through a root helper plugin you allowed, so the panel can tell cores that are in RetroArch from ones that are only downloaded.
+- Two switches: download a system's core when you choose RetroArch for it, and put automatically downloaded cores into RetroArch. A core you ask for yourself is always installed when a helper is allowed.
+- A settings page under droidtop's Settings with the same switches.
+
+### Changed
+- Contract 2 manifest. New access, shown on the approval list when you update: finding which RetroArch you have (`apps.check`, its three package ids), opening it (`apps.launch`, `apps.intents.out`, the same ids), downloading cores (`net.domains`, buildbot.libretro.com only) and, optionally, running commands as root through a helper plugin (`priv.shell.root`). Nothing else is asked for. The plugin no longer asks droidtop for a root tick (`requestsRoot` is false).
+- Getting a core into RetroArch's folder goes through the root helper plugin and droidtop's broker instead of the plugin running `su` itself. The copy now also gives the file to RetroArch's own user and makes it executable, which the old copy did not.
+- Core names are checked (letters, digits, `-` and `_`) before they are used in an address, a file name or a command.
+- The status rows report whether a root helper can install cores (`elevatedInstall`) in place of `rootApproved` and `shizukuAvailable`.
+
+### Removed
+- The flat settings rows of contract 1; the settings page replaces them.
+
+### Needs a rig check
+- With a root helper plugin installed and allowed: press a core row on the panel and confirm the core appears in RetroArch (Main Menu, Load Core) and loads. If it does not load, the owner or SELinux label of the copied file is the thing to look at.
+
 ## [1.0.0] - 2026-09-27
 
 ### Added

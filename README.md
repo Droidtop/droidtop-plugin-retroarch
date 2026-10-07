@@ -15,9 +15,12 @@ other app on the device could.
 ## Layout
 
 - `manifest.template.json` — the plugin manifest (`droidtop.retroarch`,
-  `native_bundle`, capabilities `app_status`/`status_tile`/`settings_rows`,
-  `requestsRoot: true` as an optional enhancement — see DESIGN.md 7).
+  `native_bundle`, contract 2: a Quick Menu panel `ui.panel`, a status tile,
+  a settings page and the app bridge; an optional `priv.shell` root helper for
+  installing cores — see DESIGN.md 7).
 - `src/dev/droidtop/plugins/retroarch/RetroArchPlugin.kt` — the plugin.
+  `RetroArchViews.kt` holds the pages droidtop draws, `RetroArchState.kt` its
+  small files and the core-name rules.
 - `build.sh` — compiles+dexes the payload against droidtop's
   `:plugin-host` API (unsigned; this is what CI runs).
 - `sign.sh` — signs the built payload into a
@@ -42,5 +45,6 @@ then unzip `classes.jar` out of the resulting AAR) — see
 
 Root is optional and only ever an enhancement (droidtop's own standing
 rule): every feature here has a working non-root path, documented next
-to its root-only counterpart in `DESIGN.md` §7. The plugin never
-requires the user to grant root.
+to its root-only counterpart in `DESIGN.md` §7. The plugin never runs `su`
+and never requires root: it asks a root helper plugin the user allowed,
+through droidtop, and does less when there is none.

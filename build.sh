@@ -36,7 +36,7 @@ cd "$(dirname "$0")"
 rm -rf build
 mkdir -p build/classes
 
-kotlinc -cp "$PLUGIN_HOST_CLASSPATH:$ANDROID_JAR" -d build/classes src/dev/droidtop/plugins/retroarch/RetroArchPlugin.kt
+kotlinc -cp "$PLUGIN_HOST_CLASSPATH:$ANDROID_JAR" -d build/classes $(find src -name '*.kt')
 
 d8 --output build --lib "$ANDROID_JAR" \
   $(find build/classes -name '*.class')

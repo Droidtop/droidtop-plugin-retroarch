@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- CI now signs the plugin bundle itself (repo secret `PLUGIN_SIGNING_KEY`, optional `PLUGIN_SIGNING_CERT` packaged as `origin.cert`) and attaches it to the release for a `plugin-v*` tag. No change to the plugin itself.
+
 ## [1.2.0] - 2026-10-07
 
 ### Added

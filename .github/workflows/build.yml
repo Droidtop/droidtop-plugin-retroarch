@@ -1,12 +1,16 @@
-name: Build plugin (unsigned)
+name: Build plugin
 
 # Builds this plugin's classes.jar + manifest.json against droidtop's own
 # :plugin-host API (compiled from a fresh checkout of Droidtop/droidtop),
 # the same shape droidtop's own samples/plugin-sample-statustile/build.sh
-# documents. Uploads the result UNSIGNED: this workflow never sees the
-# droidtop plugin origin's private key
-# (droidtop-dev:/root/coordination/keys/droidtop-plugins/), so signing
-# (sign.sh) always happens outside CI.
+# documents. Signs the result (see the signing step).
+# When the repo secret PLUGIN_SIGNING_KEY (this plugin's origin EC private key
+# PEM; optionally PLUGIN_SIGNING_CERT, its certificate, packaged as origin.cert)
+# is available, the job signs the bundle with sign.sh and uploads the signed
+# .droidplugin.tar.xz. The key is written to a 600 temp file inside the job and
+# deleted in an always() step. Without the secret (forks, pull requests) it
+# uploads the payload unsigned and says so in the job summary; it never fails
+# for that. A tag named plugin-v* attaches the signed bundle to that release.
 #
 # Deliberately does NOT reuse droidtop's own
 # .github/actions/android-setup: that action also builds droidtop's
@@ -22,12 +26,15 @@ name: Build plugin (unsigned)
 on:
   push:
     branches: [main]
+    tags: ['plugin-v*']
   pull_request:
   workflow_dispatch:
 
 jobs:
   build-plugin:
     runs-on: ubuntu-24.04
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
     env:
       ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
       NDK_VERSION: "27.0.12077973"
@@ -110,7 +117,7 @@ jobs:
           unzip -q "$RUNNER_TEMP/kotlinc.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
 
-      - name: Build the plugin payload (unsigned)
+      - name: Build the plugin payload
         env:
           ANDROID_JAR: ${{ env.ANDROID_SDK_ROOT }}/platforms/android-36/android.jar
         run: |
@@ -118,7 +125,47 @@ jobs:
           cd plugin
           ./build.sh
 
-      - name: Upload unsigned plugin payload
+      - name: Sign the bundle
+        id: sign
+        working-directory: plugin
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.PLUGIN_SIGNING_KEY }}
+          SIGNING_CERT: ${{ secrets.PLUGIN_SIGNING_CERT }}
+        run: |
+          set -eu
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] || [ -z "$SIGNING_KEY_PEM" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "Unsigned bundle: signing is skipped on pull requests and whenever the PLUGIN_SIGNING_KEY secret is absent (forks). The payload is uploaded unsigned." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$SIGNING_KEY_PEM" > "$RUNNER_TEMP/k.pem"
+          export PLUGIN_SIGNING_KEY="$RUNNER_TEMP/k.pem"
+          if [ -n "$SIGNING_CERT" ]; then
+            printf '%s' "$SIGNING_CERT" > "$RUNNER_TEMP/origin.cert"
+            export PLUGIN_SIGNING_CERT="$RUNNER_TEMP/origin.cert"
+          fi
+          ./sign.sh
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "Signed bundle: $(ls ./*.droidplugin.tar.xz)"
+            if [ -n "$SIGNING_CERT" ]; then echo "origin.cert included."; else echo "No PLUGIN_SIGNING_CERT secret: no origin.cert in the bundle."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the signing material
+        if: always()
+        run: rm -f -- "${RUNNER_TEMP:?}/k.pem" "${RUNNER_TEMP:?}/origin.cert"
+
+      - name: Upload signed plugin bundle
+        if: steps.sign.outputs.signed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: droidtop-plugin-retroarch
+          path: plugin/*.droidplugin.tar.xz
+          if-no-files-found: error
+
+      - name: Upload unsigned plugin payload (only when signing was skipped)
+        if: steps.sign.outputs.signed != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: droidtop-plugin-retroarch-unsigned
@@ -126,3 +173,25 @@ jobs:
             plugin/build/classes.jar
             plugin/build/manifest.json
           if-no-files-found: error
+
+  release:
+    needs: build-plugin
+    if: needs.build-plugin.outputs.signed == 'true' && startsWith(github.ref, 'refs/tags/plugin-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the signed bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: droidtop-plugin-retroarch
+          path: bundle
+
+      - name: Attach it to the release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" bundle/*.droidplugin.tar.xz --clobber

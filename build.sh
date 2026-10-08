@@ -12,9 +12,8 @@
 # Split from signing (see sign.sh) on purpose: this script never touches
 # the plugin origin's private key and is safe to run in CI (see
 # .github/workflows/build.yml), which uploads build/manifest.json +
-# build/classes.jar UNSIGNED. Only droidtop-dev, which holds
-# /root/coordination/keys/droidtop-plugins/droidtop-origin-private.pem,
-# ever runs sign.sh.
+# build/classes.jar UNSIGNED. Signing is the separate sign.sh step: CI runs it with the
+# PLUGIN_SIGNING_KEY repo secret, droidtop-dev runs it locally with the origin key.
 #
 # Prerequisites:
 #   - kotlinc on PATH (matching droidtop's own gradle/libs.versions.toml
@@ -62,5 +61,5 @@ if [ -n "${PLUGIN_SIGNING_KEY:-}" ]; then
   PLUGIN_SIGNING_KEY="$PLUGIN_SIGNING_KEY" ./sign.sh
 else
   echo "PLUGIN_SIGNING_KEY not set -- stopping here, unsigned."
-  echo "Run ./sign.sh with PLUGIN_SIGNING_KEY set (droidtop-dev only; the key never leaves that host) to produce droidtop.retroarch.droidplugin.tar.xz."
+  echo "Run ./sign.sh with PLUGIN_SIGNING_KEY set (CI does this with the PLUGIN_SIGNING_KEY repo secret) to produce droidtop.retroarch.droidplugin.tar.xz."
 fi

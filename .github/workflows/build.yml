@@ -19,7 +19,7 @@ jobs:
   bundle:
     permissions:
       contents: write
-    uses: Droidtop/droidtop-platforms/.github/workflows/droidtop-plugin-bundle.yml@c1807d73da2f4f592907f68a9aacb445c600e4bd
+    uses: Droidtop/droidtop-platforms/.github/workflows/droidtop-plugin-bundle.yml@492ce7581aae3bd12433692fa5bb725e0692a515
     with:
       plugin-dir: .
       artifact-name: droidtop-plugin-retroarch

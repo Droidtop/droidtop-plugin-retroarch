@@ -95,7 +95,66 @@ class RetroArchPlugin : DroidtopPlugin {
      */
     override fun handle(call: PluginCall): PluginReply = when (call.point) {
         POINT_PANEL, POINT_SETTINGS -> handlePage(call)
+        POINT_QUICK_TILE -> handleQuickTile(call)
         else -> LegacyHandle.translate(this, call)
+    }
+
+    // ---------------------------------------------------------------
+    // The running game: RetroArch's network commands, sent by droidtop (RetroArchGame)
+    // ---------------------------------------------------------------
+
+    /** The slot counted from the changes made here, and the game it belongs to (a new game starts at RetroArch's slot 0). */
+    @Volatile private var slot = 0
+    @Volatile private var slotGame: String? = null
+
+    /** One command through droidtop, then RetroArch's status: whether it answered, and the content it is running. */
+    private fun send(command: String): Pair<Boolean, String?> {
+        val reply = call("retroarch", "command", JSONObject().put("command", command))
+        val data = reply.optJSONObject("data")
+        val answered = reply.optBoolean("ok") && data?.optBoolean("answered") == true
+        return answered to data?.optString("content")?.ifBlank { null }
+    }
+
+    /** Keeps [slot] with its game: RetroArch starts every game on slot 0. */
+    private fun followGame(content: String?) {
+        if (content != null && content != slotGame) {
+            slotGame = content
+            slot = 0
+        }
+    }
+
+    private fun runCommand(command: String): PluginReply {
+        if (command !in RetroArchGame.COMMANDS) return PluginReply.error(PluginErrorCode.INVALID_ARGS, "Unknown command: $command")
+        val (answered, content) = send(command)
+        if (answered) {
+            followGame(content)
+            slot = RetroArchGame.slotAfter(slot, command)
+        }
+        return PluginReply.ok(JSONObject().put("message", RetroArchGame.message(command, answered, slot)))
+    }
+
+    /** The Game tab's rows: asks RetroArch's status first (`retroarch.status`, a GET_STATUS), so the rows show only when it answers. */
+    private fun gameRows(): PluginReply {
+        val reply = call("retroarch", "status")
+        val data = reply.optJSONObject("data")
+        val answered = reply.optBoolean("ok") && data?.optBoolean("answered") == true
+        if (answered) followGame(data?.optString("content")?.ifBlank { null })
+        return PluginReply.ok(RetroArchViews.gameRows(slot, answered))
+    }
+
+    /** The quick tiles a person can pin on the companion's Home or use in the Quick Menu: Save state and Fast-forward. */
+    private fun handleQuickTile(call: PluginCall): PluginReply {
+        val tile = call.args.optString("tileId")
+        val command = when (tile) {
+            TILE_SAVE -> RetroArchGame.SAVE_STATE
+            TILE_FAST_FORWARD -> RetroArchGame.FAST_FORWARD
+            else -> return PluginReply.error(PluginErrorCode.UNSUPPORTED, "Unknown tile: $tile")
+        }
+        return when (call.op) {
+            "state" -> PluginReply.ok(JSONObject().put("label", if (tile == TILE_SAVE) "Save state" else "Fast-forward").put("value", if (tile == TILE_SAVE) "Slot $slot" else JSONObject.NULL))
+            "action" -> runCommand(command)
+            else -> PluginReply.error(PluginErrorCode.UNSUPPORTED, "Unsupported op: ${call.op}")
+        }
     }
 
     override fun startJob(jobId: String, capability: PluginCapability, args: PluginArgs, progress: PluginJobProgress) {
@@ -173,7 +232,12 @@ class RetroArchPlugin : DroidtopPlugin {
     // ---------------------------------------------------------------
 
     private fun handlePage(call: PluginCall): PluginReply = when (call.op) {
-        "panel" -> PluginReply.ok(RetroArchViews.panel(model()))
+        "panel" -> if (call.args.optJSONObject("context")?.optString("surface").orEmpty().endsWith(".companion_game")) {
+            gameRows()
+        } else {
+            PluginReply.ok(RetroArchViews.panel(model()))
+        }
+        RetroArchGame.OP_COMMAND -> runCommand(call.args.optString("command"))
         "view" -> PluginReply.ok(RetroArchViews.settingsPage(model()))
         RetroArchViews.OP_SAVE -> save(call.args.optJSONObject("values"))
         RetroArchViews.OP_LAUNCH -> {
@@ -536,6 +600,9 @@ class RetroArchPlugin : DroidtopPlugin {
     companion object {
         private const val POINT_PANEL = "ui.panel"
         private const val POINT_SETTINGS = "ui.settings"
+        private const val POINT_QUICK_TILE = "ui.quick_tile"
+        private const val TILE_SAVE = "save_state"
+        private const val TILE_FAST_FORWARD = "fast_forward"
 
         // DESIGN.md 1 -- RetroArch's own pkg/android/phoenix/build.gradle product flavors, most specific first.
         private const val PACKAGE_AARCH64 = "com.retroarch.aarch64"

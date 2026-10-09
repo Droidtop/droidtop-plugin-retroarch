@@ -183,6 +183,21 @@ offers plugins no UDP, so the `load_core` app_status action that sent
 plugin's status never listed it). The facts above stay as the record of
 what RetroArch offers.
 
+**In-game commands since 1.4.0, sent by droidtop.** droidtop's
+`retroarch.command` (droidtop docs/plugin-api.md 3 B8) sends one of
+RetroArch's own hotkey command names (command.h `map[]`: `SAVE_STATE`,
+`LOAD_STATE`, `STATE_SLOT_PLUS`, `STATE_SLOT_MINUS`, `FAST_FORWARD`,
+`SHADER_TOGGLE`, `SHADER_NEXT`, `SHADER_PREV`, `FPS_TOGGLE` here) to
+`127.0.0.1:55355` for the plugin, then `GET_STATUS` (command.c
+`command_get_status`: `GET_STATUS PLAYING <system>,<content>`, or
+`CONTENTLESS`), so a row can say whether RetroArch answered. RetroArch
+has no command that reports the state slot (`command_get_config_param`
+knows `video_fullscreen`, the directories, `netplay_nickname`,
+`active_replay`, `menu_active` and `cheevos_enable`, not `state_slot`), so
+the plugin counts the slot from the changes it made, from RetroArch's
+default of 0 for each new content. The rows show only while RetroArch runs
+the game (`gamePackages`) and answers.
+
 ## 6. buildbot layout (core downloads)
 
 `config.def.h` (`DEFAULT_BUILDBOT_SERVER_URL`, lines 2069–2127) pins one

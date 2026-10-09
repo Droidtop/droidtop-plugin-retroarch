@@ -2,12 +2,14 @@
   "id": "droidtop.retroarch",
   "origin": "droidtop",
   "label": "RetroArch manager",
-  "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and (with a root helper plugin you allow) puts them into RetroArch's own cores folder. Its Quick Menu panel shows RetroArch's status, the cores for every system you play with it and the install action. See DESIGN.md for the source citations behind every claim this plugin makes.",
-  "version": "1.3.0",
+  "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and (with a root helper plugin you allow) puts them into RetroArch's own cores folder. Its Quick Menu panel shows RetroArch's status, the cores for every system you play with it and the install action; on droidtop's companion screen it adds save, load, slot, fast-forward and shader rows for the running game. See DESIGN.md for the source citations behind every claim this plugin makes.",
+  "version": "1.4.0",
   "kind": "native_bundle",
   "contractVersion": 2,
   "provides": [
-    {"point": "ui.panel", "version": 1, "label": "RetroArch"},
+    {"point": "ui.panel", "version": 1, "label": "RetroArch", "companion": ["game"], "gamePackages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"]},
+    {"point": "ui.quick_tile", "version": 1, "id": "save_state", "label": "Save state"},
+    {"point": "ui.quick_tile", "version": 1, "id": "fast_forward", "label": "Fast-forward"},
     {"point": "ui.status_tile", "version": 1, "id": "state", "label": "RetroArch", "surfaces": ["gaming.quick_menu"]},
     {"point": "ui.settings", "version": 1, "target": "plugin"},
     {"point": "apps.bridge", "version": 1}
@@ -15,6 +17,7 @@
   "permissions": [
     {"id": "apps.check", "packages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"], "reason": "Finds out which RetroArch you have installed"},
     {"id": "apps.launch", "reason": "Opens RetroArch from its panel"},
+    {"id": "retroarch.commands", "reason": "Saves and loads states, changes the slot, fast-forward and shaders in the running game from the companion screen"},
     {"id": "apps.intents.out", "packages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"], "reason": "Starts RetroArch with the core and game you chose"},
     {"id": "net.domains", "domains": ["buildbot.libretro.com"], "reason": "Downloads cores from libretro's build server"},
     {"id": "library.read", "reason": "Lists your systems and which of them RetroArch launches, so its panel shows every system and not only the ones you changed", "required": false},

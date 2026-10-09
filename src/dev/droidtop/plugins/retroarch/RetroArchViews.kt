@@ -42,6 +42,47 @@ internal object RetroArchViews {
         settingsSection(m.settings),
     )
 
+    /**
+     * The rows for the running game on droidtop's companion Game tab ([RetroArchGame]): the slot, then save, load
+     * (which asks first: `confirm`, droidtop's Ask before load and overwrite), slot down and up, fast-forward, the
+     * shader and RetroArch's FPS line. Without an answer from RetroArch, one line saying how to turn its network
+     * commands on instead.
+     */
+    fun gameRows(slot: Int, answering: Boolean): JSONObject {
+        if (!answering) {
+            return view(
+                section(
+                    "game", "RetroArch",
+                    info(
+                        "no_answer", "RetroArch is not answering", null,
+                        "Save and load from here need RetroArch's network commands: Settings, Network, Network Commands on, in RetroArch.",
+                    ),
+                ),
+            )
+        }
+        fun command(id: String, title: String, command: String, subtitle: String? = null, confirm: String? = null) =
+            button(id, title, subtitle, JSONObject().put("kind", "call").put("op", RetroArchGame.OP_COMMAND).put("args", JSONObject().put("command", command)))
+                .apply { confirm?.let { put("confirm", it) } }
+        return view(
+            section(
+                "game", "RetroArch",
+                info("slot", "Save slot", slot.toString(), "Counted from the changes made here"),
+                command("save", "Save state", RetroArchGame.SAVE_STATE, "Into slot $slot"),
+                command("load", "Load state", RetroArchGame.LOAD_STATE, "From slot $slot", confirm = "Load slot $slot? Play since that save is lost."),
+                command("slot_down", "Slot down", RetroArchGame.SLOT_MINUS),
+                command("slot_up", "Slot up", RetroArchGame.SLOT_PLUS),
+                command("fast_forward", "Fast-forward", RetroArchGame.FAST_FORWARD, "On or off"),
+            ),
+            section(
+                "look", "Picture",
+                command("shader", "Shader on or off", RetroArchGame.SHADER_TOGGLE),
+                command("shader_next", "Next shader", RetroArchGame.SHADER_NEXT),
+                command("shader_prev", "Previous shader", RetroArchGame.SHADER_PREV),
+                command("fps", "RetroArch's FPS line", RetroArchGame.FPS_TOGGLE, "On or off, drawn by RetroArch"),
+            ),
+        )
+    }
+
     /** The plugin's own page under Settings: the same settings, then the facts a person looks up rarely. */
     fun settingsPage(m: PanelModel): JSONObject = view(
         settingsSection(m.settings),

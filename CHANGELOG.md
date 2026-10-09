@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-09
+
+### Added
+- Rows for the running game on droidtop's companion screen (its Game tab, droidtop docs/plugin-api.md 3 C15): Save state, Load state (asks first), slot down and up, fast-forward, shader on or off, next and previous shader, and RetroArch's own FPS line. After each, the row says what happened ("Saved to slot 3") or "No answer from RetroArch". RetroArch's network commands are sent by droidtop (`retroarch.command`, new permission `retroarch.commands`), only while RetroArch runs the game.
+- Quick tiles Save state and Fast-forward, which a person can pin on the companion's Home.
+
+### Note
+- The slot shown is counted from the changes made here, from slot 0 for each game: RetroArch cannot be asked for its slot.
+- Needs a droidtop with `retroarch.command` and companion panels (Droidtop/tracker#414, slice C9 and C10), and RetroArch's Network Commands on.
+
+### Needs a rig check
+- Turn on Network Commands in RetroArch. Start a GBA game in RetroArch from droidtop: the companion's Game tab shows the RetroArch rows. Save state ("Saved to slot 0"), play on, Load state: it asks first, then the game goes back. Slot up, save, load: RetroArch's own slot message on screen matches the row. With Network Commands off, the rows are replaced by "RetroArch is not answering".
+
 ## [1.3.0] - 2026-10-09
 
 ### Changed

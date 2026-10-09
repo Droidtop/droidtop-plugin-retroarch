@@ -1,6 +1,5 @@
 package dev.droidtop.plugins.retroarch
 
-import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -18,14 +17,20 @@ internal data class SystemCore(val id: String, val name: String, val core: Strin
 /** What RetroArch's own cores folder held the last time the user asked to look (through the elevated helper). */
 internal data class CoreScan(val pkg: String, val cores: Set<String>)
 
+/** The plugin's own small text files by name: droidtop's data API (the plugin runs contained and opens no path). */
+internal interface PluginFiles {
+    fun read(name: String): String?
+    fun write(name: String, text: String)
+}
+
 /**
- * The plugin's small files, all in its private data directory (nothing leaves the device): its settings, the systems
+ * The plugin's small files, all in its own data kept by droidtop (nothing leaves the device): its settings, the systems
  * droidtop has said RetroArch plays, and the last look into RetroArch's cores folder. When the user has allowed "See
  * your library" the panel lists the systems droidtop itself reports ([LibrarySystems]); the systems kept here are the
  * fallback for when it has not: the ones heard about from `library.default_player_changed`, which fires when a player
  * is chosen for a system.
  */
-internal class RetroArchState(private val dir: File) {
+internal class RetroArchState(private val files: PluginFiles) {
     @Synchronized
     fun settings(): RetroArchSettings {
         val json = read(SETTINGS) ?: return RetroArchSettings()
@@ -74,18 +79,10 @@ internal class RetroArchState(private val dir: File) {
         write(SCAN, JSONObject().put("package", scan.pkg).put("cores", JSONArray(scan.cores.sorted())))
     }
 
-    private fun read(name: String): JSONObject? = runCatching { JSONObject(File(dir, name).readText()) }.getOrNull()
+    private fun read(name: String): JSONObject? = runCatching { files.read(name)?.let { JSONObject(it) } }.getOrNull()
 
-    private fun write(name: String, json: JSONObject) {
-        dir.mkdirs()
-        val target = File(dir, name)
-        val staged = File(dir, "$name.tmp")
-        staged.writeText(json.toString())
-        if (!staged.renameTo(target)) {
-            target.writeText(json.toString())
-            staged.delete()
-        }
-    }
+    // droidtop writes each file whole through a temporary file, so a crash never leaves half of one.
+    private fun write(name: String, json: JSONObject) = files.write(name, json.toString())
 
     private companion object {
         const val SETTINGS = "settings.json"

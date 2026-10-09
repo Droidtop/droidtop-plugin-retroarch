@@ -176,6 +176,13 @@ The socket is plain UDP with no auth beyond "whoever can reach
 that network can then send LOAD_CORE or ..."), so the plugin only ever
 talks to `localhost`, matching RetroArch's own security assumption.
 
+**Not used since 1.3.0.** The plugin runs contained in droidtop (an isolated
+process with no sockets; droidtop's docs/plugin-api.md 5.3), and droidtop
+offers plugins no UDP, so the `load_core` app_status action that sent
+`LOAD_CORE` here is gone. Nothing in droidtop offered it to the person (the
+plugin's status never listed it). The facts above stay as the record of
+what RetroArch offers.
+
 ## 6. buildbot layout (core downloads)
 
 `config.def.h` (`DEFAULT_BUILDBOT_SERVER_URL`, lines 2069–2127) pins one
@@ -201,8 +208,11 @@ verifies the download is a well-formed zip containing exactly one
 no separate checksum file per core, so this plugin's own SHA-256 is
 recorded only for its own re-download dedup, not upstream verification —
 documented as a real limitation, not silently assumed correct), and
-extracts it into the plugin's own private data dir
-(`PluginContext.privateDataDir()/cores/<abi>/<core>_libretro_android.so`)
+extracts it into the plugin's own data, kept by droidtop
+(`cores/<abi>/<core>_libretro_android.so` in the `data` API; since 1.3.0
+the download itself is droidtop's `net.download`, limited to the declared
+buildbot.libretro.com, and the zip and the core are read and written
+through descriptors droidtop hands over)
 because that is the only place this plugin can write without root (§3).
 
 ## 7. What the plugin does with root/Shizuku vs. without (owner directive: root optional, core function must work without it)
@@ -237,9 +247,9 @@ because that is the only place this plugin can write without root (§3).
   Core Downloader (via `PluginContext.launchApp`) with the exact core
   name shown, since that is a real, working, user-driven path on every
   install.
-- `LOAD_CORE`/`LOAD_CONTENT` over the network command port (§5) when
-  RetroArch is already running and the user turned Network Commands on
-  — this genuinely works non-root for a core RetroArch already has.
+- `LOAD_CORE`/`LOAD_CONTENT` over the network command port (§5) would
+  work non-root for a core RetroArch already has, but a contained plugin
+  has no sockets (§5, "Not used since 1.3.0").
 - Update **cheats** by downloading buildbot's `cheats.zip` bundle
   (`buildbot.libretro.com/assets/frontend/cheats.zip`, the same archive
   RetroArch's own Online Updater fetches for "Update Cheats") and

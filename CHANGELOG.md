@@ -6,8 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-09
+
 ### Changed
-- CI now signs the plugin bundle itself (repo secret `PLUGIN_SIGNING_KEY`, optional `PLUGIN_SIGNING_CERT` packaged as `origin.cert`) and attaches it to the release for a `plugin-v*` tag. No change to the plugin itself.
+- Runs contained in droidtop (droidtop docs/plugin-api.md 5.3): an isolated process with no network and no files of its own. Cores are downloaded by droidtop (`net.download`, still only from buildbot.libretro.com, as declared) into the plugin's own data, and read and written there through file descriptors droidtop hands over; the root helper gets droidtop's path of the core (`data.path`) to copy it into RetroArch. The settings, the systems heard about and the last look into RetroArch's folder are kept in the same data.
+- Needs a droidtop with the contained tier (`data`, `net.download`, `plugins.job_status` with `percent`, `plugins.job_cancel`, `data.move`, `data.path`, `PluginContext.openFile`).
+- CI now signs the plugin bundle itself (repo secret `PLUGIN_SIGNING_KEY`, optional `PLUGIN_SIGNING_CERT` packaged as `origin.cert`) and attaches it to the release for a `plugin-v*` tag.
+
+### Removed
+- The `load_core` app_status action, which sent `LOAD_CORE` to RetroArch's UDP command port: a contained plugin has no sockets, and droidtop never offered the action to anyone.
+
+### Note
+- Settings, systems and downloaded cores kept by 1.2.0 in the old data folder are the same folder droidtop's `data` API serves, so they carry over.
+
+### Needs a rig check
+- Approve the update, open the panel, press a system row with a missing core: the core downloads (progress shown, Jobs lists "Download cores/..." by droidtop), and with a root helper allowed it lands in RetroArch. Cancel one download from Jobs: it stops. Switch the two settings, leave and come back: they stayed.
 
 ## [1.2.0] - 2026-10-07
 

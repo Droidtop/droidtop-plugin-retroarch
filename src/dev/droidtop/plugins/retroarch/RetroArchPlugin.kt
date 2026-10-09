@@ -12,14 +12,8 @@ import dev.droidtop.pluginhost.PluginEvent
 import dev.droidtop.pluginhost.PluginJobProgress
 import dev.droidtop.pluginhost.PluginReply
 import dev.droidtop.pluginhost.PluginResult
-import java.io.File
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.HttpURLConnection
-import java.net.InetAddress
-import java.net.URL
+import android.os.ParcelFileDescriptor
 import java.util.concurrent.ConcurrentHashMap
-import java.util.zip.ZipInputStream
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -33,6 +27,12 @@ import org.json.JSONObject
  * (`apps.bridge`) behind it. Getting a core into RetroArch's own folder is something only root can do, and the plugin
  * never runs `su`: it asks a root helper plugin the user allowed (`priv.shell`, optional, docs/plugin-api.md 2.7), and
  * does less when there is none -- it never throws just because there is no helper.
+ *
+ * It runs contained (droidtop docs/plugin-api.md 5.3): an isolated process with no network and no files of its own.
+ * Cores come down through droidtop (`net.download`, buildbot.libretro.com only, as declared), land in the plugin's own
+ * data kept by droidtop (`data.*`), are read and written there through descriptors droidtop hands over, and reach
+ * RetroArch's folder through the root helper, given droidtop's path of the file (`data.path`). Its settings and the
+ * systems it heard about live in the same data.
  */
 /** Thrown from inside the download loop when DroidtopPlugin.cancelJob asked this job to stop -- caught in runInstallCoreJob, same as any other download failure. */
 private class CancellationException(message: String) : Exception(message)
@@ -47,7 +47,40 @@ class RetroArchPlugin : DroidtopPlugin {
 
     override fun onLoad(context: PluginContext) {
         this.context = context
-        this.state = RetroArchState(File(context.privateDataDir()))
+        this.state = RetroArchState(dataFiles)
+    }
+
+    // ---------------------------------------------------------------
+    // droidtop's broker: the plugin's only way out of its process
+    // ---------------------------------------------------------------
+
+    /** One broker call and its parsed reply; a reply that does not parse is a FAILED one, never an exception. */
+    private fun call(api: String, op: String, args: JSONObject = JSONObject()): JSONObject = runCatching {
+        JSONObject(context.call(api, 1, op, args.toString()))
+    }.getOrElse { JSONObject().put("ok", false).put("error", JSONObject().put("code", "FAILED").put("message", it.message ?: "no reply")) }
+
+    private fun JSONObject.why(): String = optJSONObject("error")?.optString("message")?.ifBlank { null } ?: "droidtop gave no reason"
+
+    /** The plugin's small JSON files, by name in its own data kept by droidtop. */
+    private val dataFiles = object : PluginFiles {
+        override fun read(name: String): String? {
+            val reply = call("data", "read", JSONObject().put("name", name))
+            return if (reply.optBoolean("ok")) reply.optJSONObject("data")?.optString("text") else null
+        }
+
+        override fun write(name: String, text: String) {
+            call("data", "write", JSONObject().put("name", name).put("text", text))
+        }
+    }
+
+    /** One of the plugin's own files as a descriptor (mode r or w), or why droidtop would not open it. */
+    private fun openData(name: String, mode: String): ParcelFileDescriptor {
+        val opened = context.openFile("data", 1, "open", JSONObject().put("name", name).put("mode", mode).toString())
+        return opened.fd ?: throw IllegalStateException("could not open $name: " + runCatching { JSONObject(opened.reply).why() }.getOrDefault("no reply"))
+    }
+
+    private fun deleteData(name: String) {
+        call("data", "delete", JSONObject().put("name", name))
     }
 
     override fun invoke(capability: PluginCapability, args: PluginArgs): PluginResult = when (capability) {
@@ -230,15 +263,19 @@ class RetroArchPlugin : DroidtopPlugin {
     }
 
     /**
-     * Puts [soFile] into RetroArch's cores folder as root and gives it the same owner RetroArch's own files have, which
-     * is what lets RetroArch load it (a file copied by root is root's, and RetroArch's user cannot read it). Each step
-     * stops the install at its own error; the file is still downloaded for the manual way (DESIGN.md 7).
+     * Puts the downloaded core [soName] (a name in the plugin's data) into RetroArch's cores folder as root and gives it
+     * the same owner RetroArch's own files have, which is what lets RetroArch load it (a file copied by root is root's,
+     * and RetroArch's user cannot read it). The helper gets droidtop's path of the file: the plugin itself cannot open a
+     * path. Each step stops the install at its own error; the file is still downloaded for the manual way (DESIGN.md 7).
      */
-    private fun installAsRoot(pkg: String, core: String, soFile: File): String? {
+    private fun installAsRoot(pkg: String, core: String, soName: String): String? {
+        val located = call("data", "path", JSONObject().put("name", soName))
+        if (!located.optBoolean("ok")) return "could not find the downloaded core: ${located.why()}"
+        val source = located.optJSONObject("data")?.optString("path").orEmpty()
         val dir = coresDir(pkg)
         val dest = "$dir/${RetroArchCores.fileName(core)}"
         exec("mkdir", "-p", dir).takeIf { !it.ok }?.let { return "could not create RetroArch's cores folder: ${it.why()}" }
-        exec("cp", soFile.absolutePath, dest).takeIf { !it.ok }?.let { return "could not copy the core: ${it.why()}" }
+        exec("cp", source, dest).takeIf { !it.ok }?.let { return "could not copy the core: ${it.why()}" }
         val owner = exec("stat", "-c", "%u:%g", "/data/data/$pkg")
         if (!owner.ok || !OWNER.matches(owner.stdout.trim())) return "could not read RetroArch's user: ${owner.why()}"
         exec("chown", owner.stdout.trim(), dest).takeIf { !it.ok }?.let { return "could not give the core to RetroArch: ${it.why()}" }
@@ -255,7 +292,6 @@ class RetroArchPlugin : DroidtopPlugin {
     private fun handleAppStatus(args: PluginArgs): PluginResult = when (args.stringOrDefault("action", "status")) {
         "status" -> statusResult()
         "launch" -> launch(args)
-        "load_core" -> sendNetworkCommand("LOAD_CORE " + args.string("corePath").orEmpty())
         else -> PluginResult.failure("unknown app_status action '" + args.string("action") + "'")
     }
 
@@ -353,29 +389,27 @@ class RetroArchPlugin : DroidtopPlugin {
             return
         }
         progress.report(0, "Downloading $core for $abi from buildbot.libretro.com")
-        val destDir = File(context.privateDataDir(), "cores/$abi").apply { mkdirs() }
-        // Staged per-jobId so two concurrent downloads (different cores, or -- as seen live on
-        // the rig -- the same core started twice) never share a zip/so path and race each
-        // other's delete()/read(); only the FINAL soFile name is shared, and it is only ever
-        // reached by an atomic rename once a job's own download+extract fully succeeds.
-        val zipFile = File(destDir, "$core.$jobId.so.zip")
-        val stagedSo = File(destDir, "$core.$jobId.so")
-        val soFile = File(destDir, RetroArchCores.fileName(core))
+        // Names in the plugin's own data. Staged per-jobId so two concurrent downloads (different cores, or -- as seen
+        // live on the rig -- the same core started twice) never share a zip/so name and race each other's delete or
+        // read; only the FINAL name is shared, and it is only ever reached by a rename (data.move) once a job's own
+        // download and extract fully succeeded.
+        val dir = "$CORES_DIR/$abi"
+        val zipName = "$dir/$core.$jobId.so.zip"
+        val stagedName = "$dir/$core.$jobId.so"
+        val soName = "$dir/${RetroArchCores.fileName(core)}"
 
         try {
-            downloadWithProgress(jobId, coreZipUrl(abi, core), zipFile) { pct -> progress.report(pct, "Downloading ($pct%)") }
+            downloadWithProgress(jobId, coreZipUrl(abi, core), zipName) { pct -> progress.report(pct, "Downloading ($pct%)") }
             progress.report(95, "Verifying archive")
-            extractSingleSo(zipFile, stagedSo)
-            zipFile.delete()
-            if (!stagedSo.renameTo(soFile)) {
-                stagedSo.copyTo(soFile, overwrite = true)
-                stagedSo.delete()
-            }
+            extractSingleSo(zipName, stagedName)
+            deleteData(zipName)
+            val moved = call("data", "move", JSONObject().put("from", stagedName).put("to", soName))
+            if (moved.optJSONObject("data")?.optBoolean("moved") != true) throw IllegalStateException("could not keep the core: ${moved.why()}")
 
             val values = mutableMapOf(
                 "core" to core,
                 "abi" to abi,
-                "path" to soFile.absolutePath,
+                "file" to soName,
             )
             val pkg = detectInstalledPackage()
             // A core a person asked for is always put in place when it can be; one droidtop fetched on its own follows the switch.
@@ -395,7 +429,7 @@ class RetroArchPlugin : DroidtopPlugin {
                 }
                 else -> {
                     progress.report(97, "Putting $core into RetroArch")
-                    val problem = installAsRoot(pkg, core, soFile)
+                    val problem = installAsRoot(pkg, core, soName)
                     if (problem == null) {
                         values["installedIntoRetroArch"] = "true"
                         state.saveScan(CoreScan(pkg, (state.scan()?.takeIf { it.pkg == pkg }?.cores.orEmpty()) + core))
@@ -409,20 +443,21 @@ class RetroArchPlugin : DroidtopPlugin {
             progress.report(100, "Done")
             progress.complete(PluginResult.success(values))
         } catch (t: Throwable) {
-            zipFile.delete()
-            stagedSo.delete()
+            deleteData(zipName)
+            deleteData(stagedName)
             progress.complete(PluginResult.failure(t.message ?: "core download failed"))
         } finally {
             cancelledJobs.remove(jobId)
         }
     }
 
+    /** The cores downloaded so far, from the plugin's own data (`cores/<abi>/<core>_libretro_android.so`). */
     private fun listDownloadedCores(): List<String> {
-        val coresRoot = File(context.privateDataDir(), "cores")
-        if (!coresRoot.isDirectory) return emptyList()
-        return coresRoot.listFiles { f -> f.isDirectory }.orEmpty()
-            .flatMap { abiDir -> abiDir.listFiles { f -> f.name.endsWith("_libretro_android.so") }.orEmpty().toList() }
-            .mapNotNull { RetroArchCores.nameOf(it.name) }
+        val reply = call("data", "list", JSONObject().put("prefix", "$CORES_DIR/"))
+        val files = reply.optJSONObject("data")?.optJSONArray("files") ?: return emptyList()
+        return (0 until files.length())
+            .mapNotNull { files.optJSONObject(it)?.optString("name")?.substringAfterLast('/') }
+            .mapNotNull { RetroArchCores.nameOf(it) }
             .distinct()
             .sorted()
     }
@@ -443,84 +478,60 @@ class RetroArchPlugin : DroidtopPlugin {
     private fun coreZipUrl(abi: String, core: String): String =
         "$BUILDBOT_BASE/$abi/" + RetroArchCores.fileName(core) + ".zip"
 
-    private fun downloadWithProgress(jobId: String, url: String, dest: File, onProgress: (Int) -> Unit) {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            instanceFollowRedirects = true
-        }
-        connection.connect()
-        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-            throw IllegalStateException("buildbot returned HTTP " + connection.responseCode + " for " + url)
-        }
-        val total = connection.contentLengthLong
-        var read = 0L
-        connection.inputStream.use { input ->
-            dest.outputStream().use { output ->
-                val buffer = ByteArray(64 * 1024)
-                var lastReported = -1
-                while (true) {
-                    // Checked every chunk (up to 64 KiB read, never a
-                    // whole file's worth) so a cancel actually stops the
-                    // transfer promptly instead of only being honored
-                    // between whole downloads.
-                    if (jobId in cancelledJobs) throw CancellationException("download cancelled")
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    output.write(buffer, 0, n)
-                    read += n
-                    if (total > 0) {
-                        val pct = ((read * 90) / total).toInt().coerceIn(0, 90)
-                        if (pct != lastReported) {
-                            onProgress(pct)
-                            lastReported = pct
-                        }
-                    }
+    /**
+     * Downloads [url] into [name] of the plugin's data through droidtop (`net.download`: droidtop checks it against the
+     * declared buildbot.libretro.com, follows any redirect itself and logs it) and waits for that job, passing its
+     * progress on as 0 to 90. A cancel of this plugin's job stops droidtop's download too.
+     */
+    private fun downloadWithProgress(jobId: String, url: String, name: String, onProgress: (Int) -> Unit) {
+        val started = call("net", "download", JSONObject().put("url", url).put("name", name))
+        if (!started.optBoolean("ok")) throw IllegalStateException("droidtop did not download the core: ${started.why()}")
+        val hostJob = started.optJSONObject("data")?.optString("jobId").orEmpty()
+        var lastReported = -1
+        while (true) {
+            if (jobId in cancelledJobs) {
+                call("plugins", "job_cancel", JSONObject().put("jobId", hostJob))
+                throw CancellationException("download cancelled")
+            }
+            val status = call("plugins", "job_status", JSONObject().put("jobId", hostJob))
+            if (!status.optBoolean("ok")) throw IllegalStateException("lost the download: ${status.why()}")
+            val data = status.optJSONObject("data") ?: JSONObject()
+            if (data.optBoolean("done")) {
+                if (!data.optBoolean("ok")) throw IllegalStateException(data.optString("message").ifBlank { "the download failed" })
+                return
+            }
+            val percent = data.optInt("percent", -1)
+            if (percent >= 0) {
+                val pct = (percent * 90 / 100).coerceIn(0, 90)
+                if (pct != lastReported) {
+                    onProgress(pct)
+                    lastReported = pct
                 }
             }
+            Thread.sleep(POLL_MS)
         }
-        connection.disconnect()
     }
 
     /**
      * buildbot publishes no per-core checksum manifest (DESIGN.md 6), so
      * the only verification available here is structural: the archive
      * must be a valid zip containing exactly one entry, and that entry
-     * must be the core .so this call asked for.
+     * must be the core .so this call asked for. Both files are the
+     * plugin's own data, read and written through descriptors droidtop
+     * hands over.
      */
-    private fun extractSingleSo(zipFile: File, destSo: File) {
-        ZipInputStream(zipFile.inputStream()).use { zip ->
+    private fun extractSingleSo(zipName: String, soName: String) {
+        java.util.zip.ZipInputStream(ParcelFileDescriptor.AutoCloseInputStream(openData(zipName, "r")).buffered()).use { zip ->
             val entry = zip.nextEntry ?: throw IllegalStateException("empty zip from buildbot")
             if (!entry.name.endsWith("_libretro_android.so")) {
                 throw IllegalStateException("unexpected zip entry '" + entry.name + "', expected a *_libretro_android.so")
             }
-            destSo.outputStream().use { out -> zip.copyTo(out) }
+            ParcelFileDescriptor.AutoCloseOutputStream(openData(soName, "w")).use { out -> zip.copyTo(out) }
             if (zip.nextEntry != null) {
                 throw IllegalStateException("zip from buildbot had more than one entry, refusing to guess which is the core")
             }
         }
     }
-
-    // ---------------------------------------------------------------
-    // Network command interface (DESIGN.md 5)
-    // ---------------------------------------------------------------
-
-    /**
-     * Sends a plaintext command over RetroArch's own UDP command socket
-     * (command.c, port 55355 by default, only active when the user
-     * enabled "Network Commands" in RetroArch's own settings). Only
-     * ever targets localhost, matching RetroArch's own trust assumption
-     * for this socket (command.c's own comment: "Anyone on that network
-     * can then send LOAD_CORE or ...").
-     */
-    private fun sendNetworkCommand(command: String): PluginResult = runCatching {
-        DatagramSocket().use { socket ->
-            val bytes = command.toByteArray(Charsets.UTF_8)
-            val packet = DatagramPacket(bytes, bytes.size, InetAddress.getLoopbackAddress(), NETWORK_CMD_PORT)
-            socket.send(packet)
-        }
-        PluginResult.success(mapOf("sent" to command))
-    }.getOrElse { PluginResult.failure(it.message ?: "failed to send network command (is RetroArch running with Network Commands enabled?)") }
 
     companion object {
         private const val POINT_PANEL = "ui.panel"
@@ -535,8 +546,11 @@ class RetroArchPlugin : DroidtopPlugin {
         // DESIGN.md 6 -- config.def.h's DEFAULT_BUILDBOT_SERVER_URL, generalised across the per-ABI folders it names.
         private const val BUILDBOT_BASE = "https://buildbot.libretro.com/nightly/android/latest"
 
-        // DESIGN.md 5 -- command.h's DEFAULT_NETWORK_CMD_PORT.
-        private const val NETWORK_CMD_PORT = 55355
+        /** Where downloaded cores live in the plugin's own data: `cores/<abi>/<core>_libretro_android.so`. */
+        private const val CORES_DIR = "cores"
+
+        /** How often a running download is asked how far it is. */
+        private const val POLL_MS = 250L
 
         /** `stat -c %u:%g` of RetroArch's data folder: numbers only, so nothing else reaches `chown`. */
         private val OWNER = Regex("^[0-9]+:[0-9]+$")

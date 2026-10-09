@@ -3,7 +3,7 @@
   "origin": "droidtop",
   "label": "RetroArch manager",
   "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and (with a root helper plugin you allow) puts them into RetroArch's own cores folder. Its Quick Menu panel shows RetroArch's status, the cores for every system you play with it and the install action. See DESIGN.md for the source citations behind every claim this plugin makes.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "kind": "native_bundle",
   "contractVersion": 2,
   "provides": [

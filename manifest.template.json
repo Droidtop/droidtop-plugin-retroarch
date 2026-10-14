@@ -2,14 +2,14 @@
   "id": "droidtop.retroarch",
   "origin": "droidtop",
   "label": "RetroArch manager",
-  "description": "Detects an installed RetroArch, launches it with a chosen core/content via its own documented Intent extras, downloads cores from buildbot.libretro.com, and (with a root helper plugin you allow) puts them into RetroArch's own cores folder. Its Quick Menu panel shows RetroArch's status, the cores for every system you play with it and the install action; on droidtop's companion screen it adds save, load, slot, fast-forward and shader rows for the running game. See DESIGN.md for the source citations behind every claim this plugin makes.",
-  "version": "1.4.0",
+  "description": "Gets RetroArch cores for your systems, opens RetroArch, and adds save, load and shader controls for the running game.",
+  "version": "1.5.0",
   "kind": "native_bundle",
   "contractVersion": 2,
   "provides": [
     {"point": "ui.panel", "version": 1, "label": "RetroArch", "companion": ["game"], "gamePackages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"]},
-    {"point": "ui.quick_tile", "version": 1, "id": "save_state", "label": "Save state"},
-    {"point": "ui.quick_tile", "version": 1, "id": "fast_forward", "label": "Fast-forward"},
+    {"point": "ui.quick_tile", "version": 1, "id": "save_state", "label": "Save state", "surfaces": ["gaming.companion", "standard.companion", "desktop.companion"]},
+    {"point": "ui.quick_tile", "version": 1, "id": "fast_forward", "label": "Fast-forward", "surfaces": ["gaming.companion", "standard.companion", "desktop.companion"]},
     {"point": "ui.status_tile", "version": 1, "id": "state", "label": "RetroArch", "surfaces": ["gaming.quick_menu"]},
     {"point": "ui.settings", "version": 1, "target": "plugin"},
     {"point": "apps.bridge", "version": 1}

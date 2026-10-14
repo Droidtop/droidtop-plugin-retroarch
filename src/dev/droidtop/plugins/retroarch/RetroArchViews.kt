@@ -55,7 +55,7 @@ internal object RetroArchViews {
                     "game", "RetroArch",
                     info(
                         "no_answer", "RetroArch is not answering", null,
-                        "Save and load from here need RetroArch's network commands: Settings, Network, Network Commands on, in RetroArch.",
+                        "Turn on Network Commands in RetroArch's Network settings.",
                     ),
                 ),
             )
@@ -66,7 +66,7 @@ internal object RetroArchViews {
         return view(
             section(
                 "game", "RetroArch",
-                info("slot", "Save slot", slot.toString(), "Counted from the changes made here"),
+                info("slot", "Save slot", slot.toString()),
                 command("save", "Save state", RetroArchGame.SAVE_STATE, "Into slot $slot"),
                 command("load", "Load state", RetroArchGame.LOAD_STATE, "From slot $slot", confirm = "Load slot $slot? Play since that save is lost."),
                 command("slot_down", "Slot down", RetroArchGame.SLOT_MINUS),
@@ -78,7 +78,7 @@ internal object RetroArchViews {
                 command("shader", "Shader on or off", RetroArchGame.SHADER_TOGGLE),
                 command("shader_next", "Next shader", RetroArchGame.SHADER_NEXT),
                 command("shader_prev", "Previous shader", RetroArchGame.SHADER_PREV),
-                command("fps", "RetroArch's FPS line", RetroArchGame.FPS_TOGGLE, "On or off, drawn by RetroArch"),
+                command("fps", "FPS counter", RetroArchGame.FPS_TOGGLE, "On or off"),
             ),
         )
     }
@@ -89,32 +89,21 @@ internal object RetroArchViews {
         section(
             "about", "About",
             info("package", "RetroArch package", m.installedPackage ?: "Not installed"),
-            info(
-                "source", "Where cores come from", "buildbot.libretro.com",
-                "Downloaded straight from libretro's build server, the same place RetroArch's own Online Updater uses.",
-            ),
+            info("source", "Cores come from", "buildbot.libretro.com"),
             info(
                 "systems", if (m.systemsFromLibrary) "Systems with RetroArch" else "Systems seen", m.systems.size.toString(),
-                if (m.systemsFromLibrary) {
-                    "Every system you have games for that RetroArch launches."
-                } else {
-                    "Systems you chose RetroArch for since this plugin was installed. Allow \"See your library\" for this plugin to list them all."
-                },
+                if (m.systemsFromLibrary) null else "Allow \"See your library\" to list them all.",
             ),
         ),
     )
 
-    private fun statusSection(m: PanelModel): JSONObject {
-        val pkg = m.installedPackage
-        return section(
-            "status", null,
-            if (pkg != null) info("retroarch", "RetroArch", "Installed", pkg)
-            else info("retroarch", "RetroArch", "Not installed", "Install RetroArch yourself; this plugin looks after cores for the copy you have."),
-            *listOfNotNull(
-                if (pkg != null) button("launch", "Open RetroArch", null, call(OP_LAUNCH)) else null,
-            ).toTypedArray(),
-        )
-    }
+    /** The panel's status tile already says whether RetroArch is installed; this section only adds the way in. */
+    private fun statusSection(m: PanelModel): JSONObject =
+        if (m.installedPackage != null) {
+            section("status", null, button("launch", "Open RetroArch", null, call(OP_LAUNCH)))
+        } else {
+            section("status", null, info("retroarch", "Install RetroArch to play with it", null, "Cores you download wait for it."))
+        }
 
     private fun coresSection(m: PanelModel): JSONObject {
         val looked = m.inRetroArch != null
@@ -124,7 +113,7 @@ internal object RetroArchViews {
             row(
                 id = "system_${system.id}",
                 title = system.name,
-                subtitle = system.core.ifBlank { "RetroArch has no core chosen for this system" },
+                subtitle = system.core.ifBlank { "No core chosen" },
                 value = RetroArchCores.label(status, looked),
                 action = if (canInstall && RetroArchCores.isValidName(system.core)) {
                     job(OP_INSTALL_CORE, JSONObject().put("core", system.core), "Installing ${system.core}")
@@ -138,16 +127,16 @@ internal object RetroArchViews {
                 info(
                     "no_systems", "No systems yet", null,
                     if (m.systemsFromLibrary) {
-                        "None of your systems launches with RetroArch. Choose it as the player for a system and it appears here with its core."
+                        "Pick RetroArch as a system's player to see its core here."
                     } else {
-                        "Choose RetroArch as the player for a system and it appears here with its core. Allow \"See your library\" for this plugin to list every system."
+                        "Pick RetroArch as a system's player, or allow \"See your library\", to see cores here."
                     },
                 ),
             )
         }.toMutableList()
         if (m.elevated) {
             items += button(
-                "scan", "Check what RetroArch has", "Looks in RetroArch's own cores folder through the root helper you allowed",
+                "scan", "Check what RetroArch has", null,
                 call(OP_SCAN),
             )
         }
@@ -156,31 +145,20 @@ internal object RetroArchViews {
 
     private fun installSection(m: PanelModel): JSONObject = section(
         "install", "Get a core",
-        text(INPUT_CORE_NAME, "Core name", "", "For example snes9x or mgba. Downloaded from buildbot.libretro.com."),
+        text(INPUT_CORE_NAME, "Core name", "", "For example snes9x or mgba"),
         button(
-            "install", "Download and install", null,
+            "install", if (m.elevated) "Download and install" else "Download", null,
             job(OP_INSTALL_CORE, JSONObject(), "Installing a core"),
         ),
-        if (m.elevated) {
-            info("elevated", "Installing into RetroArch", "Available", "A root helper you allowed puts the core where RetroArch looks for it.")
-        } else {
-            info(
-                "elevated", "Installing into RetroArch", "Not available",
-                "Without a root helper the core is downloaded only. Install it from RetroArch: Main Menu, Online Updater, Core Downloader.",
-            )
-        },
+        *listOfNotNull(
+            if (m.elevated) null else info("elevated", "Then install it in RetroArch", null, "Online Updater, Core Downloader"),
+        ).toTypedArray(),
     )
 
     private fun settingsSection(s: RetroArchSettings): JSONObject = section(
         "settings", "Settings",
-        toggle(
-            TOGGLE_AUTO_DOWNLOAD, "Download a core when you choose RetroArch for a system", s.autoDownload,
-            "Only when that system's core is not downloaded yet.",
-        ),
-        toggle(
-            TOGGLE_AUTO_INSTALL, "Put downloaded cores into RetroArch", s.autoInstall,
-            "Only with a root helper you allowed. Cores you ask for yourself are always installed.",
-        ),
+        toggle(TOGGLE_AUTO_DOWNLOAD, "Get cores automatically", s.autoDownload, "When you pick RetroArch for a system"),
+        toggle(TOGGLE_AUTO_INSTALL, "Copy cores into RetroArch", s.autoInstall, "Needs a root helper"),
     )
 
     // ---- the view schema's node and action shapes ----

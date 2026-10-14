@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-14
+
+### Changed
+- The Quick Menu panel no longer repeats the status tile: it shows Open RetroArch when RetroArch is installed and one line when it is not.
+- The Save state and Fast-forward quick tiles appear on the companion screen only (`surfaces`), not in the Quick Menu panel, where they did nothing without a running game.
+- Short labels and one-line hints: "Get cores automatically", "Copy cores into RetroArch", "Download" when there is no root helper, then "Then install it in RetroArch: Online Updater, Core Downloader"; the description is one sentence.
+
+### Needs a rig check
+- Open the Quick Menu, Plugins, RetroArch: one "RetroArch" status row at the top, no Save state or Fast-forward rows, and the cores, Get a core and Settings sections with short titles that are not cut off.
+
 ## [1.4.0] - 2026-10-09
 
 ### Added

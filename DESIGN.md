@@ -318,15 +318,9 @@ does less.
 
 ## 8. Licence
 
-This plugin is original Kotlin against droidtop's own `plugin-host` API;
-it contains **no RetroArch source**, links against no RetroArch code,
-and downloads only RetroArch's own published binary artifacts (cores,
-cheats/database/info archives) at runtime, the same way RetroArch's own
-Online Updater does — it does not redistribute them. RetroArch is
-GPL-3.0 (`github.com/libretro/RetroArch`, `LICENSE`), but that only
-constrains code derived from or linked against it, neither of which
-applies here. droidtop's plugin ecosystem otherwise uses whatever
-licence the reused upstream requires (owner directive, "most open
-compatible licence"); since nothing is reused from RetroArch, this
-repository uses the **MIT licence** — the most permissive option and the
-same choice as droidtop's other from-scratch plugin samples.
+This plugin is original Kotlin against droidtop's own `plugin-host` API; it contains **no RetroArch
+source**, links against no RetroArch code, and downloads only RetroArch's own published binary
+artifacts (cores, cheats/database/info archives) at runtime, the same way RetroArch's own Online
+Updater does; it does not redistribute them. RetroArch is GPL-3.0 (`github.com/libretro/RetroArch`).
+Owner rule (2026-10-14): our own code is GPL-3.0, and any codebase that can be GPL-3.0 must be.
+Nothing here forbids it, so this repository is **GPL-3.0** (it was MIT before that rule).

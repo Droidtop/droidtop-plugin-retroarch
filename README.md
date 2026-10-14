@@ -9,7 +9,7 @@
   <a href="https://github.com/Droidtop/droidtop-plugin-retroarch/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Droidtop/droidtop-plugin-retroarch?label=release&style=flat-square"></a>
   <a href="https://github.com/Droidtop/droidtop-plugin-retroarch/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Droidtop/droidtop-plugin-retroarch/build.yml?branch=main&label=build&style=flat-square"></a>
   <img alt="For droidtop" src="https://img.shields.io/badge/for-droidtop-2f7bf5?style=flat-square">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -83,4 +83,4 @@ then unzip `classes.jar` out of the resulting AAR) — see
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE).
+GPL-3.0, see [LICENSE](LICENSE). It contains no RetroArch source; RetroArch (GPL-3.0) is only downloaded at runtime.

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-14
+
+### Changed
+- The panel's line when RetroArch is missing is "Get RetroArch": the Quick Menu panel cut "Install RetroArch to play with it" to "INSTALL RETROARCH TO ...".
+
 ## [1.5.0] - 2026-10-14
 
 ### Changed

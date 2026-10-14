@@ -102,7 +102,7 @@ internal object RetroArchViews {
         if (m.installedPackage != null) {
             section("status", null, button("launch", "Open RetroArch", null, call(OP_LAUNCH)))
         } else {
-            section("status", null, info("retroarch", "Install RetroArch to play with it", null, "Cores you download wait for it."))
+            section("status", null, info("retroarch", "Get RetroArch", null, "Cores you download wait for it."))
         }
 
     private fun coresSection(m: PanelModel): JSONObject {

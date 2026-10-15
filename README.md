@@ -84,3 +84,7 @@ then unzip `classes.jar` out of the resulting AAR) — see
 ## Licence
 
 GPL-3.0, see [LICENSE](LICENSE). It contains no RetroArch source; RetroArch (GPL-3.0) is only downloaded at runtime.
+
+## Signing
+
+The bundle carries `manifest.jws`: a detached ES256 JWS over the exact bytes of `manifest.json`, with this repository's leaf certificate in `x5c` (the root itself is not included). The leaf comes from the repository secrets `PLUGIN_SIGNING_KEY` and `PLUGIN_SIGNING_CERT` and was issued by the droidtop root (pinned by the droidtop app); it names the plugin's origin and id. `sign_jws.py` writes the signature and checks it against the leaf before packing. `manifest.sig` stays in the bundle for older droidtop builds. Expiry dates are not checked.

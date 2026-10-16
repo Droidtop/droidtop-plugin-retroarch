@@ -161,6 +161,7 @@ class RetroArchPlugin : DroidtopPlugin {
         val envelope = args.string("call")?.let { PluginCall.fromJson(it) }
         val core: String?
         val automatic: Boolean
+        val playerPackage: String?
         if (envelope != null) {
             if (envelope.op != RetroArchViews.OP_INSTALL_CORE) {
                 throw UnsupportedOperationException("RetroArchPlugin only supports the '${RetroArchViews.OP_INSTALL_CORE}' job from its pages")
@@ -169,6 +170,7 @@ class RetroArchPlugin : DroidtopPlugin {
             val values = envelope.args.optJSONObject("values")
             core = envelope.args.optString("core").ifBlank { values?.optString(RetroArchViews.INPUT_CORE_NAME).orEmpty() }.trim()
             automatic = false
+            playerPackage = envelope.args.optString("playerPackage").ifBlank { null }
         } else {
             if (capability != PluginCapability.APP_STATUS || args.string("job") != JOB_DOWNLOAD_CORE) {
                 throw UnsupportedOperationException("RetroArchPlugin only supports the '$JOB_DOWNLOAD_CORE' job under app_status")
@@ -176,9 +178,11 @@ class RetroArchPlugin : DroidtopPlugin {
             core = args.string("core")?.trim()
             // Set by onEvent: a download droidtop started for the user, not one the user asked for.
             automatic = args.string("auto") == "true"
+            // The RetroArch droidtop plays this system with; absent from an older droidtop.
+            playerPackage = args.string("playerPackage")?.trim()?.ifBlank { null }
         }
         cancelledJobs.remove(jobId)
-        runInstallCoreJob(jobId, core, automatic, progress)
+        runInstallCoreJob(jobId, core, playerPackage, automatic, progress)
     }
 
     override fun cancelJob(jobId: String) {
@@ -202,7 +206,6 @@ class RetroArchPlugin : DroidtopPlugin {
         if (event != PluginEvent.DEFAULT_PLAYER_CHANGED) return PluginResult.success()
         val systemId = args.string("systemId").orEmpty()
         val playerPackage = args.string("playerPackage").orEmpty()
-        val installed = detectInstalledPackage()
         // The panel lists the systems RetroArch plays; a system that moved to another player leaves the list.
         if (systemId.isNotBlank()) {
             if (playerPackage in RETROARCH_PACKAGES) {
@@ -211,17 +214,19 @@ class RetroArchPlugin : DroidtopPlugin {
                 state.forgetSystem(systemId)
             }
         }
-        installed ?: return PluginResult.success()
-        if (playerPackage != installed) return PluginResult.success()
+        // A launch through any installed RetroArch may fetch its core; another player's system is not ours.
+        if (playerPackage !in RETROARCH_PACKAGES || !context.isAppInstalled(playerPackage)) return PluginResult.success()
         val core = args.string("core").orEmpty()
         if (core.isBlank() || !RetroArchCores.isValidName(core)) return PluginResult.success()
         if (!state.settings().autoDownload) return PluginResult.success(mapOf("note" to "automatic downloads are off"))
-        if (core in listDownloadedCores()) return PluginResult.success(mapOf("note" to "core '$core' already downloaded"))
+        val abi = RetroArchCores.abiFor(playerPackage, Build.SUPPORTED_ABIS.toList())
+        if (abi != null && core in listDownloadedCores(abi)) return PluginResult.success(mapOf("note" to "core '$core' already downloaded"))
         return PluginResult.success(
             mapOf(
                 "startJob" to PluginCapability.APP_STATUS.id,
                 "job" to JOB_DOWNLOAD_CORE,
                 "core" to core,
+                "playerPackage" to playerPackage,
                 "auto" to "true",
             ),
         )
@@ -437,7 +442,7 @@ class RetroArchPlugin : DroidtopPlugin {
     // Core download and install (buildbot.libretro.com, DESIGN.md 6-7)
     // ---------------------------------------------------------------
 
-    private fun runInstallCoreJob(jobId: String, core: String?, automatic: Boolean, progress: PluginJobProgress) {
+    private fun runInstallCoreJob(jobId: String, core: String?, playerPackage: String?, automatic: Boolean, progress: PluginJobProgress) {
         if (core.isNullOrBlank()) {
             progress.complete(PluginResult.failure("missing core name (e.g. 'snes9x')"))
             return
@@ -447,12 +452,17 @@ class RetroArchPlugin : DroidtopPlugin {
             progress.complete(PluginResult.failure("'$core' is not a core name (letters, digits, - and _ only)"))
             return
         }
-        val abi = preferredAbi()
+        // The RetroArch droidtop plays this system with, else (an older droidtop) the first installed one.
+        if (playerPackage != null && (playerPackage !in RETROARCH_PACKAGES || !context.isAppInstalled(playerPackage))) {
+            progress.complete(PluginResult.failure("RetroArch $playerPackage is not installed"))
+            return
+        }
+        val pkg = playerPackage ?: detectInstalledPackage()
+        val abi = if (pkg != null) RetroArchCores.abiFor(pkg, Build.SUPPORTED_ABIS.toList()) else preferredAbi()
         if (abi == null) {
             progress.complete(PluginResult.failure("no supported ABI (need arm64-v8a, armeabi-v7a, x86 or x86_64)"))
             return
         }
-        progress.report(0, "Downloading $core for $abi from buildbot.libretro.com")
         // Names in the plugin's own data. Staged per-jobId so two concurrent downloads (different cores, or -- as seen
         // live on the rig -- the same core started twice) never share a zip/so name and race each other's delete or
         // read; only the FINAL name is shared, and it is only ever reached by a rename (data.move) once a job's own
@@ -463,19 +473,25 @@ class RetroArchPlugin : DroidtopPlugin {
         val soName = "$dir/${RetroArchCores.fileName(core)}"
 
         try {
-            downloadWithProgress(jobId, coreZipUrl(abi, core), zipName) { pct -> progress.report(pct, "Downloading ($pct%)") }
-            progress.report(95, "Verifying archive")
-            extractSingleSo(zipName, stagedName)
-            deleteData(zipName)
-            val moved = call("data", "move", JSONObject().put("from", stagedName).put("to", soName))
-            if (moved.optJSONObject("data")?.optBoolean("moved") != true) throw IllegalStateException("could not keep the core: ${moved.why()}")
+            if (isWholeCore(soName, abi)) {
+                // Already fetched for this ABI: hand it over as it is, droidtop sideloads it at once.
+                progress.report(95, "$core is already downloaded")
+            } else {
+                progress.report(0, "Downloading $core for $abi from buildbot.libretro.com")
+                downloadWithProgress(jobId, coreZipUrl(abi, core), zipName) { pct -> progress.report(pct, "Downloading ($pct%)") }
+                progress.report(95, "Verifying archive")
+                extractSingleSo(zipName, stagedName)
+                deleteData(zipName)
+                val moved = call("data", "move", JSONObject().put("from", stagedName).put("to", soName))
+                if (moved.optJSONObject("data")?.optBoolean("moved") != true) throw IllegalStateException("could not keep the core: ${moved.why()}")
+            }
 
             val values = mutableMapOf(
                 "core" to core,
                 "abi" to abi,
                 "file" to soName,
             )
-            val pkg = detectInstalledPackage()
+            if (pkg != null) values["package"] = pkg
             // A core a person asked for is always put in place when it can be; one droidtop fetched on its own follows the switch.
             val install = !automatic || state.settings().autoInstall
             when {
@@ -489,7 +505,7 @@ class RetroArchPlugin : DroidtopPlugin {
                 }
                 !elevatedAvailable() -> {
                     values["installedIntoRetroArch"] = "false"
-                    values["note"] = "downloaded; no root helper is allowed, so open RetroArch's Main Menu, Online Updater, Core Downloader for '$core'"
+                    values["note"] = "downloaded; droidtop hands it to RetroArch's own sideload"
                 }
                 else -> {
                     progress.report(97, "Putting $core into RetroArch")
@@ -499,7 +515,7 @@ class RetroArchPlugin : DroidtopPlugin {
                         state.saveScan(CoreScan(pkg, (state.scan()?.takeIf { it.pkg == pkg }?.cores.orEmpty()) + core))
                     } else {
                         values["installedIntoRetroArch"] = "false"
-                        values["note"] = "downloaded, but $problem. Use RetroArch's Main Menu, Online Updater, Core Downloader for '$core'"
+                        values["note"] = "downloaded, but $problem; droidtop hands it to RetroArch's own sideload"
                     }
                 }
             }
@@ -516,8 +532,8 @@ class RetroArchPlugin : DroidtopPlugin {
     }
 
     /** The cores downloaded so far, from the plugin's own data (`cores/<abi>/<core>_libretro_android.so`). */
-    private fun listDownloadedCores(): List<String> {
-        val reply = call("data", "list", JSONObject().put("prefix", "$CORES_DIR/"))
+    private fun listDownloadedCores(abi: String? = null): List<String> {
+        val reply = call("data", "list", JSONObject().put("prefix", if (abi == null) "$CORES_DIR/" else "$CORES_DIR/$abi/"))
         val files = reply.optJSONObject("data")?.optJSONArray("files") ?: return emptyList()
         return (0 until files.length())
             .mapNotNull { files.optJSONObject(it)?.optString("name")?.substringAfterLast('/') }
@@ -538,6 +554,22 @@ class RetroArchPlugin : DroidtopPlugin {
         val supported = Build.SUPPORTED_ABIS.toSet()
         return listOf("arm64-v8a", "x86_64", "armeabi-v7a", "x86").firstOrNull { it in supported }
     }
+
+    /** True when [name] in the plugin's data is a whole ELF core for [abi] (a cut-off file is fetched again). */
+    private fun isWholeCore(name: String, abi: String): Boolean = runCatching {
+        val fd = openData(name, "r")
+        val size = fd.statSize
+        ParcelFileDescriptor.AutoCloseInputStream(fd).use { input ->
+            val header = ByteArray(64)
+            var read = 0
+            while (read < header.size) {
+                val n = input.read(header, read, header.size - read)
+                if (n < 0) break
+                read += n
+            }
+            RetroArchCores.isWholeElf(header.copyOf(read), size, abi)
+        }
+    }.getOrDefault(false)
 
     private fun coreZipUrl(abi: String, core: String): String =
         "$BUILDBOT_BASE/$abi/" + RetroArchCores.fileName(core) + ".zip"

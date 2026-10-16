@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## 1.6.0
+
+### Changed
+- `download_core` uses the `playerPackage` droidtop passes (it must be a RetroArch package and installed, else "RetroArch <package> is not installed") instead of guessing among the installed ones; the guess is kept only for an older droidtop that sends none. The automatic download on a launch no longer stops when the system's player is not the first installed RetroArch.
+- The core's ABI follows that package (aarch64 is 64-bit, ra32 is 32-bit, the universal id the device's preference), so a ra32 RetroArch on an arm64 device gets the 32-bit core.
+- A core already in the plugin's data as a whole ELF for the ABI is returned as `file` without downloading again.
+- The result also carries `package`. When no root helper is allowed the note says droidtop hands the core to RetroArch's own sideload (droidtop does that, Droidtop/tracker#271).
+
 ## 1.5.2
 
 - Signed with a leaf certificate issued by the droidtop root (manifest.jws); no functional change.

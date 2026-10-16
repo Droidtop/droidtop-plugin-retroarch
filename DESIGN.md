@@ -274,6 +274,20 @@ because that is the only place this plugin can write without root (§3).
   how droidtop's own JSON `acquire_content` writes into a library
   folder, §12).
 
+- **Which RetroArch, and the unrooted hand-off.** The package a core is for comes
+  from droidtop (`playerPackage` on the `download_core` job, validated against the
+  three ids in section 1 and installed); the plugin never picks among the installed
+  ones when droidtop names one. The ABI follows the package (no `nativeLibraryDir`
+  is offered to a plugin): aarch64 is 64-bit, ra32 is 32-bit, universal takes the
+  device's preference. The job returns `file` (the core in the plugin's data),
+  `package`, and `installedIntoRetroArch` ("true" only when the root helper put it
+  in the cores folder). Without a helper, placing the core is droidtop's hand-off:
+  it copies `file` to `Download/droidtop-cores/` and starts RetroArch's exported
+  `CoreSideloadActivity` with `LIBRETRO`, which installs it with RetroArch's own
+  storage access (buildbot builds only; Play builds cannot read shared storage).
+  Only droidtop can start that activity and write shared Download. A core already
+  fetched and whole is not downloaded again.
+
 **With a root helper plugin the user allowed (contract 2, 1.1.0), enhancement
 only.** The plugin never runs `su` and never asks droidtop for a root tick
 (`requestsRoot` is false). It declares an optional `requires` on `priv.shell`

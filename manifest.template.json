@@ -3,7 +3,7 @@
   "origin": "droidtop",
   "label": "RetroArch manager",
   "description": "Gets RetroArch cores for your systems, opens RetroArch, and adds save, load and shader controls for the running game.",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "kind": "native_bundle",
   "contractVersion": 2,
   "provides": [

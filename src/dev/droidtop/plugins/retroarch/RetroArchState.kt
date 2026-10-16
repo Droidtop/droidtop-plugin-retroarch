@@ -127,6 +127,42 @@ internal object RetroArchCores {
 
     fun fileName(core: String): String = core + "_libretro_android.so"
 
+    /**
+     * The ABI of the cores a RetroArch build loads. droidtop's plugin API gives a plugin no `nativeLibraryDir`, so this
+     * goes by the package id (DESIGN.md 1): the aarch64 build is 64-bit, ra32 is 32-bit, and the universal id takes the
+     * device's own preference ([deviceAbis] in order).
+     */
+    fun abiFor(pkg: String, deviceAbis: List<String>): String? = when (pkg) {
+        "com.retroarch.aarch64" -> deviceAbis.firstOrNull { it == "arm64-v8a" || it == "x86_64" }
+        "com.retroarch.ra32" -> deviceAbis.firstOrNull { it == "armeabi-v7a" || it == "x86" }
+        else -> listOf("arm64-v8a", "x86_64", "armeabi-v7a", "x86").firstOrNull { it in deviceAbis }
+    }
+
+    /**
+     * True when [header] (the file's first bytes) and [size] describe a whole ELF shared object for [abi]: the magic,
+     * the class and machine of the ABI, and a section header table that ends inside the file (a cut-off download
+     * does not).
+     */
+    fun isWholeElf(header: ByteArray, size: Long, abi: String): Boolean {
+        if (header.size < 52 || header[0] != 0x7f.toByte() || header[1] != 'E'.code.toByte() || header[2] != 'L'.code.toByte() || header[3] != 'F'.code.toByte()) return false
+        if (header[5] != 1.toByte()) return false // little-endian, as every Android ABI
+        val is64 = header[4] == 2.toByte()
+        val (wantClass64, machine) = when (abi) {
+            "arm64-v8a" -> true to 183
+            "armeabi-v7a" -> false to 40
+            "x86_64" -> true to 62
+            "x86" -> false to 3
+            else -> return false
+        }
+        if (is64 != wantClass64 || (is64 && header.size < 64)) return false
+        fun le(at: Int, n: Int): Long = (0 until n).fold(0L) { acc, i -> acc or ((header[at + i].toLong() and 0xff) shl (8 * i)) }
+        if (le(18, 2).toInt() != machine) return false
+        val shoff = if (is64) le(40, 8) else le(32, 4)
+        val shentsize = if (is64) le(58, 2) else le(46, 2)
+        val shnum = if (is64) le(60, 2) else le(48, 2)
+        return shoff > 0 && shentsize > 0 && shoff + shentsize * shnum <= size
+    }
+
     fun nameOf(fileName: String): String? = fileName.takeIf { it.endsWith("_libretro_android.so") }?.removeSuffix("_libretro_android.so")?.takeIf { it.isNotEmpty() }
 
     /** [inRetroArch] is null until the user has looked into RetroArch's folder through the elevated helper. */

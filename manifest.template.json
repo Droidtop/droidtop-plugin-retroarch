@@ -3,16 +3,16 @@
   "origin": "droidtop",
   "label": "RetroArch manager",
   "description": "Gets RetroArch cores for your systems, opens RetroArch, and adds save, load and shader controls for the running game.",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "kind": "native_bundle",
   "contractVersion": 2,
   "provides": [
     {"point": "ui.panel", "version": 1, "label": "RetroArch", "companion": ["game"], "gamePackages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"]},
-    {"point": "ui.quick_tile", "version": 1, "id": "save_state", "label": "Save state", "surfaces": ["gaming.companion", "standard.companion", "desktop.companion"]},
-    {"point": "ui.quick_tile", "version": 1, "id": "fast_forward", "label": "Fast-forward", "surfaces": ["gaming.companion", "standard.companion", "desktop.companion"]},
-    {"point": "ui.status_tile", "version": 1, "id": "state", "label": "RetroArch", "surfaces": ["gaming.quick_menu"]},
+    {"point": "ui.quick_tile", "version": 1, "id": "save_state", "label": "Save state", "surfaces": ["gaming.companion", "standard.companion", "desktop.companion"], "needs": "app"},
+    {"point": "ui.quick_tile", "version": 1, "id": "fast_forward", "label": "Fast-forward", "surfaces": ["gaming.companion", "standard.companion", "desktop.companion"], "needs": "app"},
+    {"point": "ui.status_tile", "version": 1, "id": "state", "label": "RetroArch", "surfaces": ["gaming.quick_menu"], "needs": "app"},
     {"point": "ui.settings", "version": 1, "target": "plugin"},
-    {"point": "apps.bridge", "version": 1}
+    {"point": "apps.bridge", "version": 1, "app": "RetroArch", "packages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"], "get": "https://www.retroarch.com/?page=platforms"}
   ],
   "permissions": [
     {"id": "apps.check", "packages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"], "reason": "Finds out which RetroArch you have installed"},

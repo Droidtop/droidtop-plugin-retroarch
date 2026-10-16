@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## 1.7.0
+
+### Changed
+- RetroArch missing is said by droidtop, not by the plugin (Droidtop/tracker#520): the `apps.bridge` entry names the app (`app`, `packages`, `get`), so droidtop puts one "RetroArch isn't installed" notice with Get at the top of the panel. The panel's own "Get RetroArch" row is gone.
+- The Save state and Fast-forward quick tiles and the status tile say `"needs": "app"`: while RetroArch is not installed droidtop draws them inert with "Needs RetroArch, which isn't installed" instead of live tiles and a "not installed" value.
+
 ## 1.6.0
 
 ### Changed

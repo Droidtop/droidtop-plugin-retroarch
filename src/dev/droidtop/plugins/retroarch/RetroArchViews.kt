@@ -36,10 +36,7 @@ internal object RetroArchViews {
 
     /** The Quick Menu panel: status, the user's systems with their cores, the install action and the settings. */
     fun panel(m: PanelModel): JSONObject = view(
-        statusSection(m),
-        coresSection(m),
-        installSection(m),
-        settingsSection(m.settings),
+        *listOfNotNull(statusSection(m), coresSection(m), installSection(m), settingsSection(m.settings)).toTypedArray(),
     )
 
     /**
@@ -97,13 +94,12 @@ internal object RetroArchViews {
         ),
     )
 
-    /** The panel's status tile already says whether RetroArch is installed; this section only adds the way in. */
-    private fun statusSection(m: PanelModel): JSONObject =
-        if (m.installedPackage != null) {
-            section("status", null, button("launch", "Open RetroArch", null, call(OP_LAUNCH)))
-        } else {
-            section("status", null, info("retroarch", "Get RetroArch", null, "Cores you download wait for it."))
-        }
+    /**
+     * The way into RetroArch. While it is not installed droidtop says so itself, at the top of the panel, with Get (the
+     * manifest's apps.bridge `app` and `get`, Droidtop/tracker#520): the panel draws no row of its own for it.
+     */
+    private fun statusSection(m: PanelModel): JSONObject? =
+        m.installedPackage?.let { section("status", null, button("launch", "Open RetroArch", null, call(OP_LAUNCH))) }
 
     private fun coresSection(m: PanelModel): JSONObject {
         val looked = m.inRetroArch != null

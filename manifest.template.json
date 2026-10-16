@@ -6,6 +6,7 @@
   "version": "1.7.0",
   "kind": "native_bundle",
   "contractVersion": 2,
+  "category": "emulators",
   "provides": [
     {"point": "ui.panel", "version": 1, "label": "RetroArch", "companion": ["game"], "gamePackages": ["com.retroarch.aarch64", "com.retroarch.ra32", "com.retroarch"]},
     {"point": "ui.quick_tile", "version": 1, "id": "save_state", "label": "Save state", "surfaces": ["gaming.companion", "standard.companion", "desktop.companion"], "needs": "app"},

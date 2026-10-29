@@ -184,7 +184,7 @@ plugin's status never listed it). The facts above stay as the record of
 what RetroArch offers.
 
 **In-game commands since 1.4.0, sent by droidtop.** droidtop's
-`retroarch.command` (droidtop docs/plugin-api.md 3 B8) sends one of
+`retroarch.send_command` (droidtop docs/plugin-api.md 3 B8) sends one of
 RetroArch's own hotkey command names (command.h `map[]`: `SAVE_STATE`,
 `LOAD_STATE`, `STATE_SLOT_PLUS`, `STATE_SLOT_MINUS`, `FAST_FORWARD`,
 `SHADER_TOGGLE`, `SHADER_NEXT`, `SHADER_PREV`, `FPS_TOGGLE` here) to

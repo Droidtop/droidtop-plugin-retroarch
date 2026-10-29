@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 - Names its kind for droidtop's Plugins page (`category`: emulators, docs/plugin-api.md 1.2, Droidtop/tracker#179).
+- Calls droidtop's host operations by their contract 2.1 names (droidtop docs/plugin-api.md 3 "Naming", Droidtop/tracker#762): `retroarch.send_command`, `retroarch.get_status`, `library.read.list_systems`, `plugins.list_available`, `data.get_path`, `job.get_status` and `job.cancel`. The old names are aliases that go at contract 2.2. Nothing changes for the person.
 
 ## 1.7.0
 

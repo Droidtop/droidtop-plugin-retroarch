@@ -31,7 +31,7 @@ import org.json.JSONObject
  * It runs contained (droidtop docs/plugin-api.md 5.3): an isolated process with no network and no files of its own.
  * Cores come down through droidtop (`net.download`, buildbot.libretro.com only, as declared), land in the plugin's own
  * data kept by droidtop (`data.*`), are read and written there through descriptors droidtop hands over, and reach
- * RetroArch's folder through the root helper, given droidtop's path of the file (`data.path`). Its settings and the
+ * RetroArch's folder through the root helper, given droidtop's path of the file (`data.get_path`). Its settings and the
  * systems it heard about live in the same data.
  */
 /** Thrown from inside the download loop when DroidtopPlugin.cancelJob asked this job to stop -- caught in runInstallCoreJob, same as any other download failure. */
@@ -109,7 +109,7 @@ class RetroArchPlugin : DroidtopPlugin {
 
     /** One command through droidtop, then RetroArch's status: whether it answered, and the content it is running. */
     private fun send(command: String): Pair<Boolean, String?> {
-        val reply = call("retroarch", "command", JSONObject().put("command", command))
+        val reply = call("retroarch", "send_command", JSONObject().put("command", command))
         val data = reply.optJSONObject("data")
         val answered = reply.optBoolean("ok") && data?.optBoolean("answered") == true
         return answered to data?.optString("content")?.ifBlank { null }
@@ -133,9 +133,9 @@ class RetroArchPlugin : DroidtopPlugin {
         return PluginReply.ok(JSONObject().put("message", RetroArchGame.message(command, answered, slot)))
     }
 
-    /** The Game tab's rows: asks RetroArch's status first (`retroarch.status`, a GET_STATUS), so the rows show only when it answers. */
+    /** The Game tab's rows: asks RetroArch's status first (`retroarch.get_status`, a GET_STATUS), so the rows show only when it answers. */
     private fun gameRows(): PluginReply {
-        val reply = call("retroarch", "status")
+        val reply = call("retroarch", "get_status")
         val data = reply.optJSONObject("data")
         val answered = reply.optBoolean("ok") && data?.optBoolean("answered") == true
         if (answered) followGame(data?.optString("content")?.ifBlank { null })
@@ -272,7 +272,7 @@ class RetroArchPlugin : DroidtopPlugin {
      * call, or its library is not loaded yet. The panel then shows the systems heard through the event instead.
      */
     private fun librarySystems(): List<SystemCore>? = runCatching {
-        val reply = JSONObject(context.call("library.read", 1, "systems", "{}"))
+        val reply = JSONObject(context.call("library.read", 1, "list_systems", "{}"))
         if (!reply.optBoolean("ok")) null else LibrarySystems.retroArchSystems(reply.optJSONObject("data"), RETROARCH_PACKAGES)
     }.getOrNull()
 
@@ -298,7 +298,7 @@ class RetroArchPlugin : DroidtopPlugin {
 
     /** True while a running plugin offers `priv.shell` at root level. Harmless to ask: it needs no grant. */
     private fun elevatedAvailable(): Boolean = runCatching {
-        val reply = JSONObject(context.call("plugins", 1, "available", JSONObject().put("api", "priv.shell").put("minLevel", "root").toString()))
+        val reply = JSONObject(context.call("plugins", 1, "list_available", JSONObject().put("api", "priv.shell").put("minLevel", "root").toString()))
         reply.optBoolean("ok") && reply.optJSONObject("data")?.optBoolean("available") == true
     }.getOrDefault(false)
 
@@ -338,7 +338,7 @@ class RetroArchPlugin : DroidtopPlugin {
      * path. Each step stops the install at its own error; the file is still downloaded for the manual way (DESIGN.md 7).
      */
     private fun installAsRoot(pkg: String, core: String, soName: String): String? {
-        val located = call("data", "path", JSONObject().put("name", soName))
+        val located = call("data", "get_path", JSONObject().put("name", soName))
         if (!located.optBoolean("ok")) return "could not find the downloaded core: ${located.why()}"
         val source = located.optJSONObject("data")?.optString("path").orEmpty()
         val dir = coresDir(pkg)
@@ -586,10 +586,10 @@ class RetroArchPlugin : DroidtopPlugin {
         var lastReported = -1
         while (true) {
             if (jobId in cancelledJobs) {
-                call("plugins", "job_cancel", JSONObject().put("jobId", hostJob))
+                call("job", "cancel", JSONObject().put("jobId", hostJob))
                 throw CancellationException("download cancelled")
             }
-            val status = call("plugins", "job_status", JSONObject().put("jobId", hostJob))
+            val status = call("job", "get_status", JSONObject().put("jobId", hostJob))
             if (!status.optBoolean("ok")) throw IllegalStateException("lost the download: ${status.why()}")
             val data = status.optJSONObject("data") ?: JSONObject()
             if (data.optBoolean("done")) {

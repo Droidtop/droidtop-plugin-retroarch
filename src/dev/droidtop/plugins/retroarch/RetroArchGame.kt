@@ -3,7 +3,7 @@ package dev.droidtop.plugins.retroarch
 /**
  * The running game's controls on droidtop's companion screen (droidtop docs/plugin-api.md 3 C15, B8): save and load
  * states, the slot, fast-forward, shaders and RetroArch's own FPS line, each one of RetroArch's network commands
- * (DESIGN.md 5), sent by droidtop (`retroarch.command`) because this plugin has no sockets. After each command droidtop
+ * (DESIGN.md 5), sent by droidtop (`retroarch.send_command`) because this plugin has no sockets. After each command droidtop
  * asks RetroArch's status, so a row says what happened ("Saved to slot 3") or that RetroArch did not answer.
  *
  * RetroArch has no command that reports the state slot (command.c `command_get_config_param` knows no `state_slot`),

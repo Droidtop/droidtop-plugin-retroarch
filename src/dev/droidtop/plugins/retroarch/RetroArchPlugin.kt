@@ -2,7 +2,6 @@ package dev.droidtop.plugins.retroarch
 
 import android.os.Build
 import dev.droidtop.pluginhost.DroidtopPlugin
-import dev.droidtop.pluginhost.LegacyHandle
 import dev.droidtop.pluginhost.PluginArgs
 import dev.droidtop.pluginhost.PluginCall
 import dev.droidtop.pluginhost.PluginCapability
@@ -90,13 +89,13 @@ class RetroArchPlugin : DroidtopPlugin {
     }
 
     /**
-     * The contract 2 entry point: the panel and the settings page are this plugin's own; the status tile and the app
-     * bridge are still the contract 1 capabilities they replaced, served through [invoke] by the host's translation.
+     * The contract 2 entry point: the panel and the settings page are this plugin's own. The status tile and the app
+     * bridge are capabilities droidtop calls through [invoke] directly; any other point is not this plugin's.
      */
     override fun handle(call: PluginCall): PluginReply = when (call.point) {
         POINT_PANEL, POINT_SETTINGS -> handlePage(call)
         POINT_QUICK_TILE -> handleQuickTile(call)
-        else -> LegacyHandle.translate(this, call)
+        else -> PluginReply.error(PluginErrorCode.UNSUPPORTED, "Nothing here for ${call.point}")
     }
 
     // ---------------------------------------------------------------

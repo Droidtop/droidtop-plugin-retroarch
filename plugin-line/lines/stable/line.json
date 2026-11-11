@@ -2,7 +2,7 @@
   "upstream": {
     "repo": "Droidtop/droidtop-plugin-retroarch",
     "ref": "creation",
-    "commit": "e2b526bcbeed44b8dc3befaa6591e3ba89f268c5"
+    "commit": "44e5ad8c9cab96867e0391c661bd2f225b68e56b"
   },
   "version": "0",
   "sharedPatches": false

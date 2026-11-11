@@ -2,7 +2,7 @@ name: Plugin tests
 
 on:
   push:
-    branches: [main]
+    branches: [creation, 'ci/**']
     paths:
       - 'src/**'
       - 'test/**'

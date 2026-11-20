@@ -6,7 +6,7 @@
   "summary": "RetroArch cores for your systems, plus save, load and shader controls",
   "publisher": "droidtop",
   "homepage": "https://github.com/Droidtop/droidtop-plugin-retroarch",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "kind": "native_bundle",
   "contractVersion": 2,
   "category": "emulators",
